@@ -58,7 +58,7 @@ LIBDIR=$(find_lib) || {
 
 usage() {
   cat <<EOF
-$PROG 0.3.0 — manage Backdrop platforms and sites from the shell
+$PROG 0.4.0 — manage Backdrop platforms and sites from the shell
           (Aegir/BOA replacement, no PHP panel)
 
   Do not type "sudo $PROG" — refused (exit 2). Use -n before mutating commands.
@@ -106,27 +106,27 @@ EXIT STATUS
   2  usage (bad flag, missing args, promote --to devel / on devel host)
 
 EXAMPLES
-  git remote add origin git@gitea-starhq:ORG/stardust.git
+  git remote add origin git@git.example:org/stardust.git
   git push -u origin devel
   git push origin devel
-  git clone -b devel git@gitea-starhq:ORG/stardust.git ~/stardust
+  git clone -b devel git@git.example:org/stardust.git ~/stardust
   cd ~/stardust && ./stardust-install.sh -n --localhost
 
   $PROG doctor
-  $PROG -n platform-add ecom --git git@gitea-starhq:ORG/ecom.git --branch devel
-  $PROG site-add ecom thq --host thq.devel
-  $PROG site-backup ecom thq
-  $PROG site-check ecom thq --host thq.devel
-  $PROG site-restore --from $STARDUST_ROOT/backups/ecom/thq/devel/STAMP ecom thq
-  $PROG site-clone ecom thq ecom thq-copy --host thq-copy.devel
-  $PROG -n promote ecom --to test          # on the VPS only
-  $PROG promote ecom --to live
+  $PROG -n platform-add mysite --git git@git.example:org/mysite.git
+  $PROG site-add mysite www --host www.devel
+  $PROG site-backup mysite www
+  $PROG site-check mysite www --host www.devel
+  $PROG site-restore --from $STARDUST_ROOT/backups/mysite/www/devel/STAMP mysite www
+  $PROG site-clone mysite www mysite www-copy --host www-copy.devel
+  $PROG -n promote mysite --to test
+  $PROG promote mysite --to live
   $PROG log 20
   $PROG last
   $PROG backup-all
   $PROG inventory
-  $PROG site-disable ecom thq && $PROG site-enable ecom thq
-  $PROG -n site-delete ecom thq-copy
+  $PROG site-disable mysite www && $PROG site-enable mysite www
+  $PROG -n site-delete mysite www-copy
   stardust-menu
   stardust-tui
   id                    # confirm www-admin stardust

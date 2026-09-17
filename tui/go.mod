@@ -1,4 +1,4 @@
-module starhq.knarr/stardust-tui
+module example.com/stardust-tui
 
 go 1.22
 

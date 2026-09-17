@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 # promote PLATFORM --to test|live
-# VPS checkout only. Fast-forward. Never merge on knarr devel.
+# Fast-forward the checkout to origin/<branch-for-that-role>. Not for role=devel.
 
 cmd_promote() {
   to=""
@@ -36,8 +36,8 @@ cmd_promote() {
 
   if [ -z "$name" ] || [ -z "$to" ]; then
     echo "usage: $PROG promote PLATFORM --to test|live" >&2
-    echo "Example: $PROG promote ecom --to test" >&2
-    echo "Run on the VPS checkout (ecom-test / ecom-live), not knarr devel." >&2
+    echo "Example: $PROG promote mysite --to test" >&2
+    echo "Run on the test/live checkout, not on a devel workstation." >&2
     exit 2
   fi
 
@@ -54,8 +54,8 @@ cmd_promote() {
   esac
 
   if [ "$STARDUST_ROLE" = devel ]; then
-    echo "$PROG: this host role is devel. promote is for the VPS." >&2
-    echo "$PROG: on knarr: commit + push, then SSH to the VPS and run promote there." >&2
+    echo "$PROG: this host role is devel. promote is for test/live hosts." >&2
+    echo "$PROG: commit and push from devel, then run promote on the target host." >&2
     exit 1
   fi
 
@@ -71,7 +71,7 @@ cmd_promote() {
     dest="$name"
   else
     echo "$PROG: no checkout $PLATFORMS/${name}-${to} or $PLATFORMS/$name" >&2
-    echo "$PROG: create it first: $PROG platform-add ${name}-${to} --git URL --branch $to" >&2
+    echo "$PROG: create it first: $PROG platform-add ${name}-${to} --git URL --branch $(branch_for_role "$to")" >&2
     exit 1
   fi
 
@@ -93,38 +93,39 @@ cmd_promote() {
     exit 1
   fi
 
-  echo "promote $name -> $to checkout=$dest origin=$(git -C "$root" remote get-url origin)"
+  br=$(branch_for_role "$to")
+  echo "promote $name -> $to branch=$br checkout=$dest origin=$(git -C "$root" remote get-url origin)"
 
   if [ "$DRYRUN" -eq 1 ]; then
     echo "+ git -C $root fetch origin"
-    echo "+ git -C $root checkout $to"
-    echo "+ git -C $root merge --ff-only origin/$to"
+    echo "+ git -C $root checkout $br"
+    echo "+ git -C $root merge --ff-only origin/$br"
     echo "+ platform-upgrade $dest --no-pull"
     return 0
   fi
 
   if ! as_root -u "$OWNER" git -C "$root" fetch origin; then
-    echo "$PROG: git fetch origin failed (SSH key / Gitea?)" >&2
+    echo "$PROG: git fetch origin failed (SSH key for the git host?)" >&2
     exit 1
   fi
 
-  if ! git -C "$root" rev-parse --verify "origin/$to" >/dev/null 2>&1; then
-    echo "$PROG: origin/$to does not exist after fetch" >&2
-    echo "$PROG: push that branch from knarr first." >&2
+  if ! git -C "$root" rev-parse --verify "origin/$br" >/dev/null 2>&1; then
+    echo "$PROG: origin/$br does not exist after fetch" >&2
+    echo "$PROG: push that branch from the devel host first." >&2
     exit 1
   fi
 
-  if ! as_root -u "$OWNER" git -C "$root" checkout "$to"; then
-    if ! as_root -u "$OWNER" git -C "$root" checkout -B "$to" "origin/$to"; then
-      echo "$PROG: cannot checkout branch $to" >&2
+  if ! as_root -u "$OWNER" git -C "$root" checkout "$br"; then
+    if ! as_root -u "$OWNER" git -C "$root" checkout -B "$br" "origin/$br"; then
+      echo "$PROG: cannot checkout branch $br" >&2
       exit 1
     fi
   fi
 
-  if ! as_root -u "$OWNER" git -C "$root" merge --ff-only "origin/$to"; then
-    echo "$PROG: fast-forward failed — local $to and origin/$to have diverged" >&2
-    echo "$PROG: inspect: git -C $root log --oneline --left-right HEAD...origin/$to" >&2
-    echo "$PROG: no merge commit will be made. Fix on Gitea / knarr, then retry." >&2
+  if ! as_root -u "$OWNER" git -C "$root" merge --ff-only "origin/$br"; then
+    echo "$PROG: fast-forward failed — local $br and origin/$br have diverged" >&2
+    echo "$PROG: inspect: git -C $root log --oneline --left-right HEAD...origin/$br" >&2
+    echo "$PROG: no merge commit will be made. Fix on the git host, then retry." >&2
     exit 1
   fi
 

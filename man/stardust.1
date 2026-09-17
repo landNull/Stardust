@@ -1,4 +1,4 @@
-.TH STARDUST 1 "16 September 2026" "starhq.knarr" "System Administration"
+.TH STARDUST 1 "16 September 2026" "Stardust" "System Administration"
 .SH NAME
 stardust \- manage Backdrop platforms and sites from the shell
 .SH SYNOPSIS
@@ -12,7 +12,7 @@ stardust \- manage Backdrop platforms and sites from the shell
 .SH DESCRIPTION
 .B stardust
 is the command-line control plane for Backdrop CMS on
-.B starhq.knarr
+.B Stardust
 and the VPS.
 It is the piece that replaces Drupal Aegir / BOA
 .I without
@@ -41,7 +41,7 @@ An
 .B environment
 is which machine and Git branch you are on:
 .B devel
-(knarr or a laptop),
+(devel host or a laptop),
 .B test
 or
 .B live
@@ -182,7 +182,7 @@ Hostname Apache and Backdrop should answer
 (default:
 .BI PRODUCT . ROLE \fR,
 for example
-.BR thq.devel ).
+.BR www.devel ).
 .TP
 .BI \-\-name " TITLE"
 Site name passed to
@@ -340,7 +340,7 @@ Preview, then install the host:
 laptop:
 .B ./stardust-install.sh \-n \-\-localhost
 .PP
-knarr:
+devel host:
 .B ./stardust-install.sh \-n \-m devel
 .PP
 VPS:
@@ -382,27 +382,27 @@ stardust platform-add scratch
 .PP
 Bee downloads Backdrop core into
 .BR /srv/platforms/scratch/web .
-.SS Clone ecom from Gitea onto knarr (devel)
+.SS Clone ecom from Gitea onto the devel host (devel)
 .nf
-stardust \-n platform-add ecom \e
-  \-\-git git@gitea-starhq:ORG/ecom.git \e
+stardust \-n platform-add mysite \e
+  \-\-git git@git.example:org/mysite.git \e
   \-\-branch devel
-stardust platform-add ecom \e
-  \-\-git git@gitea-starhq:ORG/ecom.git \e
+stardust platform-add mysite \e
+  \-\-git git@git.example:org/mysite.git \e
   \-\-branch devel
 .fi
-.SS Add the two ecom products on knarr
+.SS Add the two ecom products on the devel host
 .nf
-stardust \-n site-add ecom thq \-\-host thq.devel \-\-name "THQ devel"
-stardust site-add ecom thq \-\-host thq.devel \-\-name "THQ devel"
-stardust site-add ecom kl  \-\-host kl.devel  \-\-name "KL devel"
+stardust \-n site-add mysite www \-\-host www.devel \-\-name "THQ devel"
+stardust site-add mysite www \-\-host www.devel \-\-name "THQ devel"
+stardust site-add mysite shop  \-\-host shop.devel  \-\-name "KL devel"
 .fi
 .PP
 Open
-.B http://thq.devel
+.B http://www.devel
 and
-.B http://kl.devel
-(dnsmasq on knarr and on
+.B http://shop.devel
+(dnsmasq on the devel host and on
 .B \-\-localhost
 maps
 .B *.devel
@@ -410,19 +410,19 @@ for you).
 .SS Same products on the VPS test checkout
 The VPS uses a
 .I second
-working copy, not the knarr tree.
+working copy, not the devel host tree.
 .nf
 # on the VPS, role=test in /etc/stardust.conf
-stardust platform-add ecom-test \e
-  \-\-git git@gitea-starhq:ORG/ecom.git \e
+stardust platform-add mysite-test \e
+  \-\-git git@git.example:org/mysite.git \e
   \-\-branch test
-stardust site-add ecom-test thq \-\-host thq.smll.dev
-stardust site-add ecom-test kl  \-\-host kl.smll.dev
+stardust site-add mysite-test thq \-\-host www.test.example
+stardust site-add mysite-test kl  \-\-host shop.test.example
 .fi
 .SS Live hostnames
 .nf
-stardust site-add ecom-live thq \-\-host thehomeschoolquest.com
-stardust site-add ecom-live kl  \-\-host keslerlumber.com
+stardust site-add mysite-live thq \-\-host www.example.com
+stardust site-add mysite-live kl  \-\-host shop.example.com
 .fi
 .PP
 Cloudflare in front of the VPS: Flexible origin is HTTP only.
@@ -430,41 +430,41 @@ Full (strict) needs an origin certificate; that is not
 .B site-add .
 .SS After the site exists \- Bee, not Stardust
 .nf
-bee \-\-root=/srv/platforms/ecom/web \-\-site=thq status
-bee \-\-root=/srv/platforms/ecom/web \-\-site=thq cc all
-bee \-\-root=/srv/platforms/ecom/web \-\-site=thq config-export
-bee \-\-root=/srv/platforms/ecom/web \-\-site=kl  updb
+bee \-\-root=/srv/platforms/mysite/web \-\-site=thq status
+bee \-\-root=/srv/platforms/mysite/web \-\-site=thq cc all
+bee \-\-root=/srv/platforms/mysite/web \-\-site=thq config-export
+bee \-\-root=/srv/platforms/mysite/web \-\-site=kl  updb
 .fi
 .PP
 A Bee command without
 .B \-\-site
 on a multisite tree may pick the wrong product.
-.SS Feature worktree on knarr
+.SS Feature worktree on the devel host
 .B newfeature
 is a separate tool.
 From a site root:
 .nf
-cd /srv/platforms/ecom/web/sites/thq
+cd /srv/platforms/mysite/web/sites/www
 newfeature maps
 .fi
 .SS Backup, restore, clone, smoke check
 .nf
-stardust \-n site-backup ecom thq
-stardust site-backup ecom thq
-stardust site-restore ecom thq
-stardust site-restore \-\-from /srv/stardust/backups/ecom/thq/devel/20260916-210000 ecom thq
-stardust site-clone ecom thq ecom thq-copy \-\-host thq-copy.devel
-stardust site-check ecom thq \-\-host thq.devel
+stardust \-n site-backup mysite www
+stardust site-backup mysite www
+stardust site-restore mysite www
+stardust site-restore \-\-from /srv/stardust/backups/mysite/www/devel/20260916-210000 mysite www
+stardust site-clone mysite www mysite www-copy \-\-host www-copy.devel
+stardust site-check mysite www \-\-host www.devel
 stardust backup-all
 .fi
 .SS Upgrade and promote (VPS)
 .nf
-# knarr: commit + push devel, merge to test on Gitea
+# devel host: commit + push devel, merge to test on Gitea
 # VPS:
-stardust \-n promote ecom \-\-to test
-stardust promote ecom \-\-to test
-stardust promote ecom \-\-to live
-stardust platform-upgrade ecom-test
+stardust \-n promote mysite \-\-to test
+stardust promote mysite \-\-to test
+stardust promote mysite \-\-to live
+stardust platform-upgrade mysite-test
 stardust log 20
 stardust last
 .fi
@@ -477,8 +477,8 @@ is
 Fast-forward only; a diverged branch is an error, not a merge.
 .SS Maintenance and cron
 .nf
-stardust site-disable ecom thq
-stardust site-enable ecom thq
+stardust site-disable mysite www
+stardust site-enable mysite www
 stardust \-n cron-all
 .fi
 .PP
@@ -498,18 +498,18 @@ git init && git checkout -B devel
 git add stardust-install.sh stardust stardust.1 stardust-lib \e
   crdir crdir.1 newfeature stardust-tutorial.txt .gitignore
 git commit -m "stardust CLI"
-git remote add origin git@gitea-starhq:ORG/stardust.git
+git remote add origin git@git.example:org/stardust.git
 git remote -v
-ssh -T git@gitea-starhq
+ssh -T git@git.example
 git push -u origin devel
 # later from this laptop:
 git push
 # same as: git push origin devel
 .fi
 .PP
-On knarr or the VPS:
+On the devel host or the VPS:
 .nf
-git clone -b devel git@gitea-starhq:ORG/stardust.git /home/deploy/stardust
+git clone -b devel git@git.example:org/stardust.git /home/deploy/stardust
 cd /home/deploy/stardust
 ./stardust-install.sh \-n \-m devel
 .fi
@@ -520,7 +520,7 @@ cd /home/deploy/stardust
 ./stardust-install.sh \-\-localhost
 .fi
 .nf
-# knarr devel + optional CSF (SSH only via WireGuard / LAN)
+# devel host devel + optional CSF (SSH only via WireGuard / LAN)
 ./stardust-install.sh \-n \-m devel
 ./stardust-install.sh \-F \-m devel
 .fi
@@ -602,6 +602,6 @@ by hand.
 Tutorials in the artifacts folder:
 .BR stardust-tutorial.txt ,
 .BR ecom-multisite-tutorial.txt ,
-.BR ecom-test-live-filesystem-tutorial.docx .
+.BR mysite-test-live-filesystem-tutorial.docx .
 .SH AUTHOR
-Written for the starhq.knarr Backdrop platforms layout.
+Written for the Stardust Backdrop platforms layout.

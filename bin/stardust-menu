@@ -195,7 +195,7 @@ while :; do
       pause
       ;;
     promote-test)
-      name=$(ask "platform name (ecom, not ecom-test)" "ecom") || continue
+      name=$(ask "platform name (ecom, not mysite-test)" "ecom") || continue
       echo "+ $SD promote $name --to test"
       $SD promote "$name" --to test
       pause

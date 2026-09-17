@@ -1,9 +1,9 @@
 # Stardust — install the host, then run the CLI
 
 system:
-  os: Devuan (sysvinit) on knarr; any Debian-family or similar on a laptop / VPS
-  hostname: starhq.knarr
-  cpu: 8-core AMD FX-8320E
+  os: Devuan (sysvinit) on the devel host; any Debian-family or similar on a laptop / VPS
+  hostname: Stardust
+  cpu: (your host)
   ram: 32GB
   storage: 2x1TB SSD RAID 1
   stack: Apache + PHP + MariaDB + Bee + crdir
@@ -24,9 +24,9 @@ system:
              each has its own DB, files, config
 
   environment
-             devel  = knarr, or a laptop with --localhost
-             test   = VPS checkout /srv/platforms/ecom-test
-             live   = VPS checkout /srv/platforms/ecom-live
+             devel  = devel host, or a laptop with --localhost
+             test   = VPS checkout /srv/platforms/mysite-test
+             live   = VPS checkout /srv/platforms/mysite-live
              Never run all three out of one working copy.
 
   deploy     Unix user that owns Git and runs Bee
@@ -101,7 +101,7 @@ Stardust is a repo of TOOLS, not a Backdrop platform.
 Do not run "stardust platform-add stardust".
 Do not put /srv/platforms or /srv/stardust/state/secrets in this repo.
 
-What belongs in git@gitea-starhq:ORG/stardust.git
+What belongs in git@git.example:org/stardust.git
 
   stardust-install.sh
   stardust
@@ -149,16 +149,16 @@ before install):
   git commit -m "stardust CLI + installer + lib"
 
   # first time only — name the remote
-  git remote add origin git@gitea-starhq:ORG/stardust.git
+  git remote add origin git@git.example:org/stardust.git
 
   # if you already added origin and need to point it again:
-  # git remote set-url origin git@gitea-starhq:ORG/stardust.git
+  # git remote set-url origin git@git.example:org/stardust.git
 
   git remote -v
-  # origin  git@gitea-starhq:ORG/stardust.git (fetch)
-  # origin  git@gitea-starhq:ORG/stardust.git (push)
+  # origin  git@git.example:org/stardust.git (fetch)
+  # origin  git@git.example:org/stardust.git (push)
 
-  ssh -T git@gitea-starhq
+  ssh -T git@git.example
   # must succeed as YOUR Gitea user (not deploy)
 
   # first push of branch devel (sets upstream)
@@ -183,18 +183,18 @@ nothing else has commits you need.
 If SSH works but push asks for a password, you are hitting
 HTTPS by mistake. The remote MUST start with git@ not https://
 
-  git remote set-url origin git@gitea-starhq:ORG/stardust.git
+  git remote set-url origin git@git.example:org/stardust.git
   git push -u origin devel
 
-On knarr or the VPS you clone the tools, then run the installer
+On the devel host or the VPS you clone the tools, then run the installer
 from that clone so ship_tools sees stardust-lib next to the script:
 
   sudo -u deploy -H git clone \
     -b devel \
-    git@gitea-starhq:ORG/stardust.git \
+    git@git.example:org/stardust.git \
     /home/deploy/stardust
   cd /home/deploy/stardust
-  ./stardust-install.sh -n -m devel     # knarr
+  ./stardust-install.sh -n -m devel     # devel host
   ./stardust-install.sh -n --localhost  # another laptop
 
 Updates later:
@@ -229,7 +229,7 @@ Pick ONE profile. Preview, then run for real.
   Skips:
     CSF, WireGuard policy, certbot
 
-2b. knarr  (devel, LAN 192.168.1.120 + WireGuard 10.8.0.1)
+2b. devel host  (devel, LAN 192.168.1.120 + WireGuard 10.8.0.1)
 
   ./stardust-install.sh -n -m devel
   ./stardust-install.sh -m devel
@@ -245,7 +245,7 @@ Pick ONE profile. Preview, then run for real.
     sudo sed -i 's/^TESTING = .*/TESTING = "0"/' /etc/csf/csf.conf
     sudo csf -r
 
-  dnsmasq on knarr: address=/devel/192.168.1.120
+  dnsmasq on the devel host: address=/devel/192.168.1.120
 
 2c. VPS test
 
@@ -361,16 +361,16 @@ Global flag (before the command name):
        stardust -n platform-add scratch
        stardust platform-add scratch
 
-     Clone ecom from Gitea onto knarr:
+     Clone ecom from Gitea onto the devel host:
 
-       stardust -n platform-add ecom \
-         --git git@gitea-starhq:ORG/ecom.git \
+       stardust -n platform-add mysite \
+         --git git@git.example:org/mysite.git \
          --branch devel
-       stardust platform-add ecom \
-         --git git@gitea-starhq:ORG/ecom.git \
+       stardust platform-add mysite \
+         --git git@git.example:org/mysite.git \
          --branch devel
 
-     Default --branch is STARDUST_ROLE from conf (devel on knarr).
+     Default --branch is STARDUST_ROLE from conf (devel on the devel host).
 
 4.5  stardust site-add PLATFORM PRODUCT [--host HOST] [--name TITLE] [--pass PASS]
 
@@ -386,20 +386,20 @@ Global flag (before the command name):
        bee --site=PRODUCT install --auto
        Apache vhost PLATFORM-ROLE.conf + reload
 
-     Default --host is PRODUCT.ROLE  e.g. thq.devel
+     Default --host is PRODUCT.ROLE  e.g. www.devel
      Default --pass is generated and printed once. Save it.
 
-     knarr, two products on ecom:
+     devel host, two products on ecom:
 
-       stardust -n site-add ecom thq --host thq.devel --name "THQ devel"
-       stardust site-add ecom thq --host thq.devel --name "THQ devel"
-       stardust site-add ecom kl  --host kl.devel  --name "KL devel"
+       stardust -n site-add mysite www --host www.devel --name "WWW devel"
+       stardust site-add mysite www --host www.devel --name "WWW devel"
+       stardust site-add mysite shop  --host shop.devel  --name "Shop devel"
 
-     Browse http://thq.devel and http://kl.devel
-     (dnsmasq on knarr and --localhost maps *.devel).
+     Browse http://www.devel and http://shop.devel
+     (dnsmasq on the devel host and --localhost maps *.devel).
 
 --------------------------------------------------------------------
-5. Worked example — knarr ecom from zero
+5. Worked example — devel host ecom from zero
 --------------------------------------------------------------------
 
   # 1 host
@@ -409,19 +409,19 @@ Global flag (before the command name):
   stardust doctor
 
   # 2 platform
-  stardust -n platform-add ecom \
-    --git git@gitea-starhq:ORG/ecom.git --branch devel
-  stardust platform-add ecom \
-    --git git@gitea-starhq:ORG/ecom.git --branch devel
+  stardust -n platform-add mysite \
+    --git git@git.example:org/mysite.git --branch devel
+  stardust platform-add mysite \
+    --git git@git.example:org/mysite.git --branch devel
 
   # 3 products
-  stardust site-add ecom thq --host thq.devel --name "THQ devel"
-  stardust site-add ecom kl  --host kl.devel  --name "KL devel"
+  stardust site-add mysite www --host www.devel --name "WWW devel"
+  stardust site-add mysite shop  --host shop.devel  --name "Shop devel"
 
   # 4 confirm
   stardust list
-  bee --root=/srv/platforms/ecom/web --site=thq status
-  bee --root=/srv/platforms/ecom/web --site=kl  status
+  bee --root=/srv/platforms/mysite/web --site=www status
+  bee --root=/srv/platforms/mysite/web --site=shop  status
 
 If ecom already exists under /srv/platforms/ecom, skip platform-add
 and only run site-add for a product that is not there yet.
@@ -434,22 +434,22 @@ and only run site-add for a product that is not there yet.
   ./stardust-install.sh -m test
   stardust doctor
 
-  # second checkout — not the knarr path
-  stardust platform-add ecom-test \
-    --git git@gitea-starhq:ORG/ecom.git --branch test
+  # second checkout — not the devel host path
+  stardust platform-add mysite-test \
+    --git git@git.example:org/mysite.git --branch test
 
-  stardust site-add ecom-test thq --host thq.smll.dev
-  stardust site-add ecom-test kl  --host kl.smll.dev
+  stardust site-add mysite-test thq --host www.test.example
+  stardust site-add mysite-test kl  --host shop.test.example
 
 No dnsmasq. Point Cloudflare / public DNS at the VPS.
 
-Live is the same with -m live, path ecom-live, branch live,
-hosts thehomeschoolquest.com and keslerlumber.com.
+Live is the same with -m live, path mysite-live, branch live,
+hosts www.example.com and shop.example.com.
 
-  stardust platform-add ecom-live \
-    --git git@gitea-starhq:ORG/ecom.git --branch live
-  stardust site-add ecom-live thq --host thehomeschoolquest.com
-  stardust site-add ecom-live kl  --host keslerlumber.com
+  stardust platform-add mysite-live \
+    --git git@git.example:org/mysite.git --branch live
+  stardust site-add mysite-live thq --host www.example.com
+  stardust site-add mysite-live kl  --host shop.example.com
 
 Cloudflare Flexible = HTTP origin, no certbot required for Apache.
 Full (strict) = origin cert; that is outside site-add.
@@ -459,7 +459,7 @@ Full (strict) = origin cert; that is outside site-add.
 --------------------------------------------------------------------
 
   # 0 tools from Gitea (section 1b) or from a copy of artifacts
-  git clone -b devel git@gitea-starhq:ORG/stardust.git ~/stardust
+  git clone -b devel git@git.example:org/stardust.git ~/stardust
   cd ~/stardust
 
   ./stardust-install.sh -n --localhost
@@ -469,11 +469,11 @@ Full (strict) = origin cert; that is outside site-add.
   stardust doctor
 
   # 1 site code is a DIFFERENT repo
-  stardust platform-add ecom \
-    --git git@gitea-starhq:ORG/ecom.git --branch devel
-  stardust site-add ecom thq --host thq.devel
+  stardust platform-add mysite \
+    --git git@git.example:org/mysite.git --branch devel
+  stardust site-add mysite www --host www.devel
 
-  # http://thq.devel should hit 127.0.0.1:80
+  # http://www.devel should hit 127.0.0.1:80
 
 If the distro Apache still has a stock "Listen 80" on all
 addresses, disable that so only stardust-localhost.conf
@@ -486,12 +486,12 @@ addresses, disable that so only stardust-localhost.conf
 Stardust builds the box and the first install.
 Everything else is Bee with --site.
 
-  bee --root=/srv/platforms/ecom/web --site=thq status
-  bee --root=/srv/platforms/ecom/web --site=thq cc all
-  bee --root=/srv/platforms/ecom/web --site=thq updb
-  bee --root=/srv/platforms/ecom/web --site=thq config-export
-  bee --root=/srv/platforms/ecom/web --site=kl  config-import
-  bee --root=/srv/platforms/ecom/web --site=thq db-export /tmp/thq.sql
+  bee --root=/srv/platforms/mysite/web --site=www status
+  bee --root=/srv/platforms/mysite/web --site=www cc all
+  bee --root=/srv/platforms/mysite/web --site=www updb
+  bee --root=/srv/platforms/mysite/web --site=www config-export
+  bee --root=/srv/platforms/mysite/web --site=shop  config-import
+  bee --root=/srv/platforms/mysite/web --site=www db-export /tmp/thq.sql
 
 A Bee command without --site on a multisite tree may pick
 the wrong product.
@@ -504,9 +504,9 @@ per product. That workflow is in ecom-multisite-tutorial.txt.
 9. newfeature (separate tool, shipped by the installer)
 --------------------------------------------------------------------
 
-From a site root on knarr:
+From a site root on the devel host:
 
-  cd /srv/platforms/ecom/web/sites/thq
+  cd /srv/platforms/mysite/web/sites/www
   newfeature maps
 
 Creates a Git worktree, feature hostname, and DB clone.
@@ -535,36 +535,36 @@ man crdir
 --------------------------------------------------------------------
 
   # smoke test after an upgrade
-  stardust -n site-check ecom thq --host thq.devel
-  stardust site-check ecom thq --host thq.devel
+  stardust -n site-check mysite www --host www.devel
+  stardust site-check mysite www --host www.devel
 
   # one product
-  stardust -n site-backup ecom thq
-  stardust site-backup ecom thq
-  stardust site-restore ecom thq
-  stardust site-restore --from /srv/stardust/backups/ecom/thq/devel/20260916-210000 ecom thq
+  stardust -n site-backup mysite www
+  stardust site-backup mysite www
+  stardust site-restore mysite www
+  stardust site-restore --from /srv/stardust/backups/mysite/www/devel/20260916-210000 mysite www
 
   # copy a product (new hostname)
-  stardust site-clone ecom thq ecom thq-copy --host thq-copy.devel
+  stardust site-clone mysite www mysite www-copy --host www-copy.devel
 
   # every product on this box (also nightly via /etc/cron.d/stardust)
   stardust backup-all
 
-  # VPS only — knarr role=devel will refuse
-  stardust -n promote ecom --to test
-  stardust promote ecom --to test
-  stardust promote ecom --to live
+  # VPS only — devel host role=devel will refuse
+  stardust -n promote mysite --to test
+  stardust promote mysite --to test
+  stardust promote mysite --to live
 
   # same as promote's second half, if git is already current
-  stardust platform-upgrade ecom-test
+  stardust platform-upgrade mysite-test
 
   # task journal
   stardust log 20
   stardust last
 
   # maintenance
-  stardust site-disable ecom thq
-  stardust site-enable ecom thq
+  stardust site-disable mysite www
+  stardust site-enable mysite www
 
   # Bee cron by hand (installer already schedules cron-all)
   stardust -n cron-all
@@ -595,7 +595,7 @@ Exit status:
     Don't. The wrapper sudoes the few root steps.
 
   One working copy for devel + test + live
-    Don't. Separate checkouts: ecom, ecom-test, ecom-live.
+    Don't. Separate checkouts: ecom, mysite-test, mysite-live.
 
   Bee without --site
     Wrong product, or Bee refuses.
@@ -613,8 +613,8 @@ Exit status:
     The installer will not install it for -m test or -m live.
     Use public DNS.
 
-  stardust promote on knarr
-    Role devel refuses. Push from knarr, promote on the VPS.
+  stardust promote on the devel host
+    Role devel refuses. Push from the devel host, promote on the VPS.
 
 --------------------------------------------------------------------
 13. See also
@@ -624,4 +624,4 @@ Exit status:
   man crdir
   artifacts/stardust-settings.json
   artifacts/ecom-multisite-tutorial.txt
-  artifacts/ecom-test-live-filesystem-tutorial.docx
+  artifacts/mysite-test-live-filesystem-tutorial.docx

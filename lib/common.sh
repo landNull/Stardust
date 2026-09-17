@@ -66,6 +66,23 @@ chown_secret() {
 BEE=${BEE:-bee}
 APACHE_RELOAD=${APACHE_RELOAD:-/etc/init.d/apache2 reload}
 STARDUST_ROLE=${STARDUST_ROLE:-devel}
+# Git branch for this role. Override per role in /etc/stardust.conf
+#   BRANCH_DEVEL=main BRANCH_TEST=staging BRANCH_LIVE=production
+# Or pin one name on this host: STARDUST_BRANCH=main
+branch_for_role() {
+  role=${1:-$STARDUST_ROLE}
+  if [ -n "${STARDUST_BRANCH:-}" ]; then
+    printf '%s\n' "$STARDUST_BRANCH"
+    return 0
+  fi
+  case $role in
+    devel) printf '%s\n' "${BRANCH_DEVEL:-devel}" ;;
+    test)  printf '%s\n' "${BRANCH_TEST:-test}" ;;
+    live)  printf '%s\n' "${BRANCH_LIVE:-live}" ;;
+    *)     printf '%s\n' "$role" ;;
+  esac
+}
+
 DB_HOST=${DB_HOST:-127.0.0.1}
 DB_PREFIX=${DB_PREFIX:-bd_}
 KEEP_BACKUPS=${KEEP_BACKUPS:-7}

@@ -1,6 +1,6 @@
 #!/bin/sh
 # stardust-install.sh — idempotent bootstrap for Stardust
-# Same script on knarr (devel) and the VPS (test / live).
+# Same script on a devel workstation and a remote test/live host.
 # Contract: artifacts/stardust-settings.json
 #
 # Detects package manager and init. Does not assume Devuan or systemd.
@@ -14,13 +14,13 @@
 #   stardust-install.sh -h
 #
 # ROLE: devel | test | live
-#       knarr-devel, vps-test, vps-live still accepted as aliases.
+#       devel, vps-test, vps-live still accepted as aliases.
 
 set -eu
 
 PROG=${0##*/}
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-STARDUST_VERSION=0.3.0
+STARDUST_VERSION=0.4.0
 if [ -f "$HERE/VERSION" ]; then
   STARDUST_VERSION=$(tr -d ' \n' < "$HERE/VERSION")
 fi
@@ -47,6 +47,7 @@ GROUP=""
 PLATFORMS=/srv/platforms
 STARDUST=/srv/stardust
 CONF=""
+CSF_ALLOW="10.8.0.0/24 192.168.1.0/24"
 BEE_SRC=https://github.com/backdrop-contrib/bee.git
 BEE_DST=/usr/local/src/bee
 BEE_BIN=/usr/local/bin/bee
@@ -63,7 +64,7 @@ usage() {
 $PROG $STARDUST_VERSION — prepare any Stardust host (Apache + PHP + MariaDB + Bee)
 
 WHAT THIS IS FOR
-  One script for knarr and the VPS. Detects apt vs other managers and
+  One script for any host. Detects apt vs other managers and
   sysvinit vs systemd vs OpenRC. Creates users deploy and www-admin,
   the $STARDUST control plane, missing packages, PHP/MariaDB snippets,
   companion CLIs (crdir, newfeature, stardust, bee), and conf files.
@@ -115,7 +116,7 @@ FLAGS
 
 SAFE FIRST RUN
   laptop: $PROG -n --localhost
-  knarr:  $PROG -n -m devel
+  devel:  $PROG -n -m devel
   VPS:    $PROG -n -m test     (or -m live)
 
 WHAT IT WILL NOT DO
@@ -153,7 +154,7 @@ have() {
 
 normalize_role() {
   case $1 in
-    devel|knarr-devel|localhost|dev) echo devel ;;
+    devel|devel|localhost|dev) echo devel ;;
     test|vps-test) echo test ;;
     live|vps-live|prod|production) echo live ;;
     *) echo "" ;;
@@ -667,13 +668,13 @@ opcache.validate_timestamps = 1
 }
 
 tune_vps() {
-  # RoseHosting KVM + NVMe (test/live). Skip laptop and knarr devel.
+  # Public VPS (test/live). Skip laptop and devel workstations.
   # ip_forward stays 1 — WireGuard needs it. Do not disable IPv6 here.
   if [ "$LOCALHOST" -eq 1 ] || [ "$ROLE" = devel ]; then
     echo "VPS harden skipped (localhost/devel)"
     return 0
   fi
-  sysctl_body="# Stardust VPS (RoseHosting KVM) — do not set ip_forward=0 (WG)
+  sysctl_body="# Stardust VPS — do not set ip_forward=0 (WireGuard)
 vm.swappiness = 10
 vm.dirty_ratio = 20
 vm.dirty_background_ratio = 5
@@ -723,8 +724,8 @@ MaxKeepAliveRequests 100
       run_root a2enconf stardust-harden >/dev/null 2>&1 || true
     fi
   fi
-  echo "VPS harden: sysctl 60-stardust, limits, Apache tokens/timeouts (RoseHosting KVM/NVMe)"
-  echo "note: Rose weekly snapshots are not a CMS backup — keep stardust backup-all + offsite"
+  echo "VPS harden: sysctl 60-stardust, limits, Apache tokens/timeouts"
+  echo "note: provider disk snapshots are not a CMS backup — keep backup-all + offsite"
 }
 
 tune_mysql() {
@@ -840,6 +841,15 @@ DB_PREFIX=bd_
 KEEP_BACKUPS=7
 NOTIFY=
 HOOKS=$STARDUST/hooks
+# Git URL template. %s is the platform name.
+# STARDUST_GIT_TEMPLATE=git@git.example:org/%s.git
+STARDUST_GIT_TEMPLATE=
+# Branch names (defaults match roles). Override for main/staging/production.
+BRANCH_DEVEL=devel
+BRANCH_TEST=test
+BRANCH_LIVE=live
+# STARDUST_BRANCH=
+CSF_ALLOW="10.8.0.0/24 192.168.1.0/24"
 EOF
   as_root chmod 0644 "$dest"
   echo "wrote $dest"
@@ -874,8 +884,8 @@ setup_csf() {
     as_root sh -c "cat > '$policy'" <<EOF
 # Stardust CSF policy — remote admin only over WireGuard
 # SSH is not in TCP_IN. Allow SSH from these sources in csf.allow:
-#   10.8.0.0/24     WireGuard
-#   192.168.1.0/24  knarr LAN
+#   10.8.0.0/24     WireGuard (default)
+#   192.168.1.0/24  private LAN (override CSF_ALLOW)
 TCP_IN=$tcp_in
 UDP_IN=51820
 TCP6_IN=
@@ -910,7 +920,7 @@ EOF
 
   if [ "$DRYRUN" -eq 1 ]; then
     echo "+ apply CSF policy TCP_IN=$tcp_in UDP_IN=51820 TESTING=1"
-    echo "+ csf.allow 10.8.0.0/24 and 192.168.1.0/24"
+    echo "+ csf.allow ${CSF_ALLOW:-10.8.0.0/24 192.168.1.0/24}"
     return 0
   fi
 
@@ -930,7 +940,7 @@ EOF
     csf_set TCP_IN "$tcp_in"
   fi
 
-  for src in 10.8.0.0/24 192.168.1.0/24; do
+  for src in ${CSF_ALLOW:-10.8.0.0/24 192.168.1.0/24}; do
     if ! grep -q "$src" /etc/csf/csf.allow 2>/dev/null; then
       as_root sh -c "echo '$src # Stardust SSH/WG' >> /etc/csf/csf.allow"
     fi
@@ -1070,7 +1080,7 @@ else
   fi
 fi
 
-# --- sudoers (limited, same on knarr and VPS) -------------------------
+# --- sudoers (limited; same on every host) -------------------------
 # deploy: dirs, ownership, Apache site tools, service reload, Bee link.
 # www-admin: dirs and ownership under /srv only — no a2ensite, no pkg.
 # One helper. No NOPASSWD chown/rm/mysql for the human.
@@ -1220,12 +1230,16 @@ if [ "$LOCALHOST" -eq 1 ]; then
   echo "localhost: Apache should listen on 127.0.0.1 only (disable stock Listen 80 if it still binds all addresses)"
 fi
 
-# dnsmasq: local + knarr devel only. Never on VPS test/live (public DNS).
+# dnsmasq: devel / --localhost only. Never on test/live (use public DNS).
 if [ "$LOCALHOST" -eq 1 ] || [ "$ROLE" = devel ]; then
   if [ "$LOCALHOST" -eq 1 ]; then
     dns_ip=127.0.0.1
   else
-    dns_ip=192.168.1.120
+    dns_ip=${DEV_DNS_IP:-}
+    if [ -z "$dns_ip" ]; then
+      dns_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    [ -n "$dns_ip" ] || dns_ip=127.0.0.1
   fi
   if [ -d /etc/dnsmasq.d ] || [ "$DRYRUN" -eq 1 ]; then
     printf '%s\n' "address=/devel/${dns_ip}" | write_dropin /etc/dnsmasq.d/stardust.conf

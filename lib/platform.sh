@@ -34,10 +34,15 @@ cmd_platform_add() {
   name=$(slug "$name")
   if [ -z "$name" ]; then
     echo "usage: $PROG platform-add NAME [--git URL] [--branch BRANCH]" >&2
+    echo "  default: clone STARDUST_GIT_TEMPLATE (use %s for NAME) onto branch $(branch_for_role)" >&2
+    echo "  --branch overrides BRANCH_DEVEL / BRANCH_TEST / BRANCH_LIVE / STARDUST_BRANCH" >&2
     exit 2
   fi
   if [ -z "$branch" ]; then
-    branch=$STARDUST_ROLE
+    branch=$(branch_for_role)
+  fi
+  if [ -z "$giturl" ] && [ -n "${STARDUST_GIT_TEMPLATE:-}" ]; then
+    giturl=$(printf '%s' "$STARDUST_GIT_TEMPLATE" | sed "s|%s|$name|g")
   fi
 
   dest=$PLATFORMS/$name
@@ -49,6 +54,7 @@ cmd_platform_add() {
 
   run_root mkdir -p "$PLATFORMS"
   if [ -n "$giturl" ]; then
+    echo "clone $giturl branch $branch -> $dest"
     run_root git clone --branch "$branch" "$giturl" "$dest" || run_root git clone "$giturl" "$dest"
   else
     run_root mkdir -p "$dest"

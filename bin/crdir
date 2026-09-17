@@ -25,7 +25,7 @@ usage() {
 $PROG — create a directory and set who can use it
 
 WHAT THIS IS FOR
-  On knarr, Apache (user www-data) and you (user deploy) both need to
+  On the devel host, Apache (user www-data) and you (user deploy) both need to
   write the same Backdrop directories: files, files_private, and
   config/.../active. Plain mkdir leaves them owned by whoever ran it.
   $PROG creates the path, then sets owner, group, and mode on the
@@ -58,7 +58,7 @@ FLAGS (all optional)
 SAFE FIRST RUN
   Always try -n first:
 
-    $PROG -n -s /srv/platforms/ecom/files/thq
+    $PROG -n -s /srv/platforms/mysite/files/www
 
   Read the + mkdir / + chown / + chmod lines. If they look right,
   run the same command without -n.
@@ -70,20 +70,20 @@ EXAMPLES
   Preview setgid dirs for one product:
 
     $PROG -n -s \\
-      /srv/platforms/ecom/files/thq \\
-      /srv/platforms/ecom/files_private/thq \\
-      /srv/platforms/ecom/config/thq/active
+      /srv/platforms/mysite/files/www \\
+      /srv/platforms/mysite/files_private/www \\
+      /srv/platforms/mysite/config/www/active
 
   Create them for real:
 
     $PROG -s \\
-      /srv/platforms/ecom/files/thq \\
-      /srv/platforms/ecom/files_private/thq \\
-      /srv/platforms/ecom/config/thq/active
+      /srv/platforms/mysite/files/www \\
+      /srv/platforms/mysite/files_private/www \\
+      /srv/platforms/mysite/config/www/active
 
   Staging config (no -s):
 
-    $PROG /srv/platforms/ecom/config/thq/staging
+    $PROG /srv/platforms/mysite/config/www/staging
 
   Ask for everything interactively:
 

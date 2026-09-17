@@ -1,8 +1,8 @@
 #!/bin/sh
-# newfeature — provision an ecom (or other platform) Git worktree preview
+# newfeature — provision a platform Git worktree preview
 # Must be run from a site root, e.g.:
-#   /srv/platforms/ecom/thq
-#   /srv/platforms/ecom/web/sites/thq
+#   /srv/platforms/mysite/thq
+#   /srv/platforms/mysite/web/sites/thq
 #
 #   newfeature
 #   newfeature maps
@@ -225,5 +225,5 @@ echo
 echo "git    cd $WT && git push -u origin $BRANCH"
 echo "bee    bee --root=$WT/web --site=$site status"
 echo
-echo "Add $HOST to DNS or /etc/hosts → knarr."
+echo "Add $HOST to DNS or /etc/hosts."
 echo "For the other product, cd to that site root and run newfeature $slug again."

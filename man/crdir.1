@@ -1,4 +1,4 @@
-.TH CRDIR 1 "16 September 2026" "starhq.knarr" "System Administration"
+.TH CRDIR 1 "16 September 2026" "Stardust" "System Administration"
 .SH NAME
 crdir \- create directories with a chosen owner, group, and mode
 .SH SYNOPSIS
@@ -42,7 +42,7 @@ into
 mode 0770 by accident.
 .PP
 The usual job on
-.B starhq.knarr
+.B Stardust
 and the VPS is making Backdrop trees that both
 .B deploy
 (Git, Bee, SSH) and
@@ -221,57 +221,57 @@ and (when not root)
 .BR sudo .
 .SH FILES
 No configuration file.
-Defaults are compiled in to match the knarr stack:
+Defaults are compiled in to match the default stack:
 .BR deploy ,
 .BR www\-data ,
 .BR 0770 .
 .SH EXAMPLES
-A first\-time sysadmin on knarr can copy these as written.
+A first\-time sysadmin on the devel host can copy these as written.
 .SS Preview before touching the disk
 .nf
 crdir \-n \-s \e
-  /srv/platforms/ecom/files/thq \e
-  /srv/platforms/ecom/files_private/thq \e
-  /srv/platforms/ecom/config/thq/active
+  /srv/platforms/mysite/files/www \e
+  /srv/platforms/mysite/files_private/www \e
+  /srv/platforms/mysite/config/www/active
 .fi
 .PP
 Read the lines that start with
 .BR + .
 If they look right, run the same command without
 .BR \-n .
-.SS Devel checkout on knarr (setgid trees)
+.SS Devel checkout on the devel host (setgid trees)
 These directories are written by both PHP and deploy.
 .nf
 crdir \-s \e
-  /srv/platforms/ecom/files/thq \e
-  /srv/platforms/ecom/files/kl \e
-  /srv/platforms/ecom/files_private/thq \e
-  /srv/platforms/ecom/files_private/kl \e
-  /srv/platforms/ecom/config/thq/active \e
-  /srv/platforms/ecom/config/kl/active
+  /srv/platforms/mysite/files/www \e
+  /srv/platforms/mysite/files/kl \e
+  /srv/platforms/mysite/files_private/www \e
+  /srv/platforms/mysite/files_private/kl \e
+  /srv/platforms/mysite/config/www/active \e
+  /srv/platforms/mysite/config/kl/active
 .fi
 .SS Staging config (no setgid)
 These directories are Git\-tracked and should stay deploy\-written.
 .nf
 crdir \e
-  /srv/platforms/ecom/config/thq/staging \e
-  /srv/platforms/ecom/config/kl/staging
+  /srv/platforms/mysite/config/www/staging \e
+  /srv/platforms/mysite/config/kl/staging
 .fi
 .SS Same layout on the VPS
 Change only the Git root.
 Test:
 .nf
 crdir \-s \e
-  /srv/platforms/ecom\-test/files/thq \e
-  /srv/platforms/ecom\-test/files/kl \e
-  /srv/platforms/ecom\-test/files_private/thq \e
-  /srv/platforms/ecom\-test/files_private/kl \e
-  /srv/platforms/ecom\-test/config/thq/active \e
-  /srv/platforms/ecom\-test/config/kl/active
+  /srv/platforms/mysite\-test/files/www \e
+  /srv/platforms/mysite\-test/files/kl \e
+  /srv/platforms/mysite\-test/files_private/www \e
+  /srv/platforms/mysite\-test/files_private/kl \e
+  /srv/platforms/mysite\-test/config/www/active \e
+  /srv/platforms/mysite\-test/config/kl/active
 
 crdir \e
-  /srv/platforms/ecom\-test/config/thq/staging \e
-  /srv/platforms/ecom\-test/config/kl/staging
+  /srv/platforms/mysite\-test/config/www/staging \e
+  /srv/platforms/mysite\-test/config/kl/staging
 .fi
 .PP
 Live: replace
@@ -281,7 +281,7 @@ with
 .SS One directory, all flags spelled out
 .nf
 crdir \-o deploy \-g www\-data \-m 0770 \-s \e
-  /srv/platforms/ecom/files/thq
+  /srv/platforms/mysite/files/www
 .fi
 .SS Interactive (no arguments)
 .nf
@@ -289,7 +289,7 @@ crdir
 .fi
 .PP
 Accept the three defaults, then type the paths.
-Useful at the knarr console when you do not want to remember flags.
+Useful at the local console when you do not want to remember flags.
 .SS What a good result looks like
 .nf
 drwxrws--- 2 deploy www\-data 4096 Sep 16 18:00 files/thq
@@ -380,6 +380,6 @@ instead.
 .BR sudo (8),
 .BR ls (1)
 .SH AUTHOR
-Written for the starhq.knarr Backdrop platforms layout
+Written for the Stardust Backdrop platforms layout
 .RB ( /srv/platforms )
 on Devuan (sysvinit).
