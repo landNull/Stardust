@@ -1,0 +1,385 @@
+.TH CRDIR 1 "16 September 2026" "starhq.knarr" "System Administration"
+.SH NAME
+crdir \- create directories with a chosen owner, group, and mode
+.SH SYNOPSIS
+.B crdir
+.RB [ \-n ]
+.RB [ \-s ]
+.RB [ \-o
+.IR owner ]
+.RB [ \-g
+.IR group ]
+.RB [ \-m
+.IR mode ]
+.I dir
+.RI [ dir " ...]"
+.PP
+.B crdir
+.SH DESCRIPTION
+.B crdir
+creates one or more directories and then sets owner, group, and
+permissions
+.I only on the paths you named
+.
+Missing parent directories are created with
+.BR mkdir (1)
+.BR \-p
+so the command works like
+.B mkdir \-p
+plus
+.BR chown / chmod
+on the leaf.
+.PP
+Parents that had to be created are
+.I not
+re\-owned.
+That avoids turning
+.B /srv
+or
+.B /srv/platforms
+into
+.B deploy:www\-data
+mode 0770 by accident.
+.PP
+The usual job on
+.B starhq.knarr
+and the VPS is making Backdrop trees that both
+.B deploy
+(Git, Bee, SSH) and
+.B www\-data
+(Apache, PHP) must write:
+.IP \(bu 3
+.BI files/ site
+.IP \(bu 3
+.BI files_private/ site
+.IP \(bu 3
+.BI config/ site /active
+.PP
+Those three need the setgid bit
+.RB ( \-s )
+so new files inherit group
+.BR www\-data .
+Git\-tracked
+.B config/*/staging
+is normally created
+.I without
+.BR \-s .
+.SH OPTIONS
+.TP
+.BI \-o " owner"
+Directory owner.
+Default:
+.BR deploy .
+.TP
+.BI \-g " group"
+Directory group.
+Default:
+.BR www\-data .
+.TP
+.BI \-m " mode"
+Octal mode, with or without a leading zero.
+Default:
+.BR 0770
+(owner and group may read, write, and enter; others have no access).
+.TP
+.B \-s
+Set the setgid bit on each
+.I named
+directory
+.RB ( chmod " g+s)."
+New files and subdirectories created inside then keep group
+.IR group .
+Use this on public files, private files, and active config.
+Do not use it on every parent you did not mean to share.
+.TP
+.B \-n
+Dry run.
+Print the
+.BR mkdir ,
+.BR chown ,
+and
+.BR chmod
+commands with a leading
+.B +
+and do not run them.
+User and group existence are not checked in this mode so you can
+preview on a laptop.
+.TP
+.BR \-h ", " \-\-help
+Print the built\-in help and exit.
+The help is written for a first\-time sysadmin: what the tool is for,
+which flags to use, a dry\-run first step, and a copy\-paste example.
+.B \-\-help
+is accepted anywhere on the command line.
+.SH INTERACTIVE MODE
+If you pass
+.I no
+directory arguments,
+.B crdir
+asks:
+.PP
+.RS
+user  [deploy]:
+.br
+group [www\-data]:
+.br
+mode  [0770]:
+.br
+paths (space\-separated):
+.RE
+.PP
+Press Enter to keep a default.
+Type every path on one line, separated by spaces.
+Paths that contain spaces cannot be entered this way; pass them as
+command\-line arguments instead (quoted).
+.PP
+If directories
+.I are
+given on the command line, there are no prompts.
+Missing
+.BR \-o / \-g / \-m
+values use the defaults.
+That is the form to use in scripts and in
+.BR newfeature .
+.SH HOW OWNERSHIP IS APPLIED
+For each named
+.IR dir :
+.IP 1. 3
+If
+.I dir
+exists and is not a directory,
+.B crdir
+exits with an error and changes nothing further.
+.IP 2. 3
+If
+.I dir
+does not exist,
+.B mkdir \-p
+creates it and any missing parents.
+.IP 3. 3
+.B chown
+.IR owner : group
+and
+.B chmod
+.I mode
+run on
+.I dir
+only.
+.IP 4. 3
+If
+.B \-s
+was given,
+.B chmod g+s
+runs on
+.I dir
+only.
+.PP
+An existing named directory is brought into line (idempotent).
+Contents inside it are not changed.
+This is not a recursive repair tool.
+.PP
+When the operator is not root,
+.BR mkdir ,
+.BR chown ,
+and
+.BR chmod
+are run with
+.BR sudo (8).
+The rest of the script is not.
+Default owner stays
+.B deploy
+even if you ran
+.B sudo crdir
+(do not do that; run
+.B crdir
+as
+.B deploy
+and let it sudo the three commands).
+.SH EXIT STATUS
+.TP
+.B 0
+Every named path is a directory.
+In dry\-run mode, the plan was printed.
+.TP
+.B 1
+Bad mode, unknown user or group, empty path list, or a named path
+exists and is not a directory.
+.TP
+.B 2
+Unknown option.
+.SH ENVIRONMENT
+.TP
+.B PATH
+Must contain
+.BR mkdir ,
+.BR chown ,
+.BR chmod ,
+.BR id ,
+.BR getent ,
+.BR ls ,
+and (when not root)
+.BR sudo .
+.SH FILES
+No configuration file.
+Defaults are compiled in to match the knarr stack:
+.BR deploy ,
+.BR www\-data ,
+.BR 0770 .
+.SH EXAMPLES
+A first\-time sysadmin on knarr can copy these as written.
+.SS Preview before touching the disk
+.nf
+crdir \-n \-s \e
+  /srv/platforms/ecom/files/thq \e
+  /srv/platforms/ecom/files_private/thq \e
+  /srv/platforms/ecom/config/thq/active
+.fi
+.PP
+Read the lines that start with
+.BR + .
+If they look right, run the same command without
+.BR \-n .
+.SS Devel checkout on knarr (setgid trees)
+These directories are written by both PHP and deploy.
+.nf
+crdir \-s \e
+  /srv/platforms/ecom/files/thq \e
+  /srv/platforms/ecom/files/kl \e
+  /srv/platforms/ecom/files_private/thq \e
+  /srv/platforms/ecom/files_private/kl \e
+  /srv/platforms/ecom/config/thq/active \e
+  /srv/platforms/ecom/config/kl/active
+.fi
+.SS Staging config (no setgid)
+These directories are Git\-tracked and should stay deploy\-written.
+.nf
+crdir \e
+  /srv/platforms/ecom/config/thq/staging \e
+  /srv/platforms/ecom/config/kl/staging
+.fi
+.SS Same layout on the VPS
+Change only the Git root.
+Test:
+.nf
+crdir \-s \e
+  /srv/platforms/ecom\-test/files/thq \e
+  /srv/platforms/ecom\-test/files/kl \e
+  /srv/platforms/ecom\-test/files_private/thq \e
+  /srv/platforms/ecom\-test/files_private/kl \e
+  /srv/platforms/ecom\-test/config/thq/active \e
+  /srv/platforms/ecom\-test/config/kl/active
+
+crdir \e
+  /srv/platforms/ecom\-test/config/thq/staging \e
+  /srv/platforms/ecom\-test/config/kl/staging
+.fi
+.PP
+Live: replace
+.B ecom\-test
+with
+.BR ecom\-live .
+.SS One directory, all flags spelled out
+.nf
+crdir \-o deploy \-g www\-data \-m 0770 \-s \e
+  /srv/platforms/ecom/files/thq
+.fi
+.SS Interactive (no arguments)
+.nf
+crdir
+.fi
+.PP
+Accept the three defaults, then type the paths.
+Useful at the knarr console when you do not want to remember flags.
+.SS What a good result looks like
+.nf
+drwxrws--- 2 deploy www\-data 4096 Sep 16 18:00 files/thq
+.fi
+.PP
+Letters:
+.B rwx
+for deploy,
+.B rws
+for www\-data (the
+.B s
+is setgid),
+.B \-\-\-
+for others.
+User
+.BR deploy ,
+group
+.BR www\-data .
+.PP
+Staging without
+.B \-s
+looks like
+.B rwxrwx\-\-\-
+(no
+.B s
+in the group column).
+.SH WHY SETGID
+Without
+.BR \-s ,
+the next file PHP writes is owned
+.B www\-data:www\-data
+and deploy cannot delete or commit it unless you add extra sudo.
+With
+.BR \-s ,
+the file is
+.B www\-data:www\-data
+still as
+.I user
+but the
+.I group
+stays
+.B www\-data
+on the directory, and 0770 lets deploy in via the group.
+.PP
+Setgid does not change files that already exist inside the tree.
+To repair an old tree you still need a separate
+.B chown \-R
+pass; that is out of scope for
+.BR crdir .
+.SH NOTES
+.IP \(bu 3
+Install the script on
+.B PATH
+as
+.B crdir
+(for example
+.BR /usr/local/sbin/crdir )
+and this page as
+.BR /usr/local/share/man/man1/crdir.1 .
+Then
+.B man crdir
+works.
+Until then:
+.B man ./crdir.1
+from the directory that holds the page.
+.IP \(bu 3
+Do not run
+.B sudo crdir
+for the whole script.
+Run it as
+.BR deploy .
+It will ask for a sudo password only for
+.BR mkdir / chown / chmod .
+.IP \(bu 3
+.B crdir
+never recursively changes files already in the directory.
+.IP \(bu 3
+Octal modes only.
+.B u=rwx,g=rwx,o=
+is rejected; write
+.B 0770
+instead.
+.SH SEE ALSO
+.BR mkdir (1),
+.BR chown (1),
+.BR chmod (1),
+.BR install (1),
+.BR sudo (8),
+.BR ls (1)
+.SH AUTHOR
+Written for the starhq.knarr Backdrop platforms layout
+.RB ( /srv/platforms )
+on Devuan (sysvinit).

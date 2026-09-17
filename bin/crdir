@@ -1,0 +1,225 @@
+#!/bin/sh
+# crdir — create directories with owner, group, mode (optional setgid)
+# See crdir.1 for the full manual.
+#
+# Usage: crdir [-n] [-s] [-o owner] [-g group] [-m mode] dir [dir ...]
+#        crdir
+#
+# Named directories get owner/group/mode (and -s). Parents are created
+# with mkdir -p only; they are not chown'd.
+
+set -eu
+
+PROG=${0##*/}
+DRYRUN=0
+SETGID=0
+owner=""
+group=""
+mode=""
+flag_o=0
+flag_g=0
+flag_m=0
+
+usage() {
+  cat <<EOF
+$PROG — create a directory and set who can use it
+
+WHAT THIS IS FOR
+  On knarr, Apache (user www-data) and you (user deploy) both need to
+  write the same Backdrop directories: files, files_private, and
+  config/.../active. Plain mkdir leaves them owned by whoever ran it.
+  $PROG creates the path, then sets owner, group, and mode on the
+  directories you named.
+
+  Parents that do not exist yet are created, but they keep normal
+  root-owned permissions. Only the paths you list are handed to
+  deploy:www-data.
+
+HOW TO RUN IT
+  $PROG [-n] [-s] [-o owner] [-g group] [-m mode] DIR [DIR ...]
+  $PROG                  (asks questions, then creates what you type)
+  $PROG -h
+  $PROG --help
+
+FLAGS (all optional)
+  -o owner   Who owns the directory.          Default: deploy
+  -g group   Which group owns it.             Default: www-data
+  -m mode    Permission bits, octal only.     Default: 0770
+             0770 means: deploy and www-data may read/write/enter;
+             everyone else is locked out.
+  -s         Setgid. New files inside keep group www-data so both
+             accounts can keep working. Use this on files,
+             files_private, and config/.../active.
+             Do NOT use -s on config/.../staging (Git-only).
+  -n         Dry run. Print the commands with a leading + and change
+             nothing. Use this the first time so you can read the plan.
+  -h, --help This text.
+
+SAFE FIRST RUN
+  Always try -n first:
+
+    $PROG -n -s /srv/platforms/ecom/files/thq
+
+  Read the + mkdir / + chown / + chmod lines. If they look right,
+  run the same command without -n.
+
+  Run $PROG as deploy. Do not type "sudo $PROG". The script calls
+  sudo only for mkdir, chown, and chmod.
+
+EXAMPLES
+  Preview setgid dirs for one product:
+
+    $PROG -n -s \\
+      /srv/platforms/ecom/files/thq \\
+      /srv/platforms/ecom/files_private/thq \\
+      /srv/platforms/ecom/config/thq/active
+
+  Create them for real:
+
+    $PROG -s \\
+      /srv/platforms/ecom/files/thq \\
+      /srv/platforms/ecom/files_private/thq \\
+      /srv/platforms/ecom/config/thq/active
+
+  Staging config (no -s):
+
+    $PROG /srv/platforms/ecom/config/thq/staging
+
+  Ask for everything interactively:
+
+    $PROG
+
+WHAT SUCCESS LOOKS LIKE
+  ls -ld should print something like:
+
+    drwxrws--- 2 deploy www-data 4096 Sep 16 18:00 files/thq
+
+  The letter s in rws is setgid (-s). Staging without -s looks like
+  rwxrwx--- (no s).
+
+MORE DETAIL
+  man $PROG          (after crdir.1 is installed)
+  man ./crdir.1      (from the folder that holds the man page)
+EOF
+}
+
+as_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+run() {
+  if [ "$DRYRUN" -eq 1 ]; then
+    printf '+'
+    for a in "$@"; do
+      printf ' %s' "$a"
+    done
+    printf '\n'
+    return 0
+  fi
+  as_root "$@"
+}
+
+# Long options getopts cannot see. Accept them anywhere.
+for arg in "$@"; do
+  case $arg in
+    --help|-help)
+      usage
+      exit 0
+      ;;
+  esac
+done
+
+while getopts 'no:g:m:sh' opt; do
+  case $opt in
+    n) DRYRUN=1 ;;
+    o) owner=$OPTARG; flag_o=1 ;;
+    g) group=$OPTARG; flag_g=1 ;;
+    m) mode=$OPTARG; flag_m=1 ;;
+    s) SETGID=1 ;;
+    h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+# Interactive prompts only when no directories were given on the command line.
+if [ "$#" -eq 0 ]; then
+  if [ "$flag_o" -eq 0 ]; then
+    printf "user  [deploy]: "
+    read -r owner
+  fi
+  if [ "$flag_g" -eq 0 ]; then
+    printf "group [www-data]: "
+    read -r group
+  fi
+  if [ "$flag_m" -eq 0 ]; then
+    printf "mode  [0770]: "
+    read -r mode
+  fi
+  printf "paths (space-separated): "
+  read -r pathline
+  if [ -z "${pathline:-}" ]; then
+    echo "$PROG: at least one path is required" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2086
+  set -- $pathline
+fi
+
+owner=${owner:-deploy}
+group=${group:-www-data}
+mode=${mode:-0770}
+
+case $mode in
+  0[0-7][0-7][0-7]|[0-7][0-7][0-7]) ;;
+  *)
+    echo "$PROG: mode must be octal like 0770" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$DRYRUN" -eq 0 ]; then
+  if ! id "$owner" >/dev/null 2>&1; then
+    echo "$PROG: user '$owner' does not exist" >&2
+    exit 1
+  fi
+  if ! getent group "$group" >/dev/null 2>&1; then
+    echo "$PROG: group '$group' does not exist" >&2
+    exit 1
+  fi
+fi
+
+for d in "$@"; do
+  if [ -z "$d" ]; then
+    echo "$PROG: empty path" >&2
+    exit 1
+  fi
+  if [ -e "$d" ] && [ ! -d "$d" ]; then
+    echo "$PROG: exists and is not a directory: $d" >&2
+    exit 1
+  fi
+done
+
+echo "$PROG -o $owner -g $group -m $mode${SETGID:+ -s} $*"
+
+for d in "$@"; do
+  if [ ! -d "$d" ]; then
+    run mkdir -p "$d"
+  fi
+  run chown "$owner:$group" "$d"
+  run chmod "$mode" "$d"
+  if [ "$SETGID" -eq 1 ]; then
+    run chmod g+s "$d"
+  fi
+done
+
+if [ "$DRYRUN" -eq 0 ]; then
+  echo
+  for d in "$@"; do
+    ls -ld "$d"
+  done
+fi

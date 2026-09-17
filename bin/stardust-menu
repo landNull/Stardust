@@ -1,0 +1,225 @@
+#!/bin/sh
+# stardust-menu — Aegir-shaped picker over the Stardust CLI
+# Prefers gum; falls back to whiptail, then dialog.
+# Does not reimplement backup/upgrade. Do not sudo this wrapper.
+
+set -eu
+
+PROG=${0##*/}
+SD=${STARDUST_BIN:-stardust}
+TITLE="Stardust"
+
+if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
+  echo "$PROG: do not run this with sudo or as root." >&2
+  echo "$PROG: log in as your operator account and run: $PROG" >&2
+  echo "$PROG: stardust calls sudo -n only when a command needs root." >&2
+  exit 2
+fi
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+if ! have "$SD"; then
+  echo "$PROG: $SD not on PATH" >&2
+  exit 1
+fi
+
+UI=""
+if have gum; then
+  UI=gum
+elif have whiptail; then
+  UI=whiptail
+elif have dialog; then
+  UI=dialog
+else
+  echo "$PROG: install gum (apt install gum) or whiptail" >&2
+  echo "Without a TUI, run: $SD -h" >&2
+  exit 1
+fi
+
+pause() {
+  printf '\n[Enter] '
+  read -r _ || true
+}
+
+pick() {
+  # pick PROMPT item...
+  prompt=$1
+  shift
+  if [ $# -eq 0 ]; then
+    echo ""
+    return 1
+  fi
+  case $UI in
+    gum)
+      gum choose --header "$prompt" "$@"
+      ;;
+    whiptail)
+      n=$#
+      args=""
+      i=1
+      for x in "$@"; do
+        args="$args $x $i"
+        i=$((i + 1))
+      done
+      # shellcheck disable=SC2086
+      whiptail --title "$TITLE" --menu "$prompt" 20 72 12 $args 3>&1 1>&2 2>&3
+      ;;
+    dialog)
+      args=""
+      i=1
+      for x in "$@"; do
+        args="$args $x $i"
+        i=$((i + 1))
+      done
+      # shellcheck disable=SC2086
+      dialog --title "$TITLE" --menu "$prompt" 20 72 12 $args 3>&1 1>&2 2>&3
+      ;;
+  esac
+}
+
+confirm() {
+  msg=$1
+  case $UI in
+    gum) gum confirm "$msg" ;;
+    whiptail) whiptail --title "$TITLE" --yesno "$msg" 10 60 ;;
+    dialog) dialog --title "$TITLE" --yesno "$msg" 10 60 ;;
+  esac
+}
+
+ask() {
+  prompt=$1
+  def=${2:-}
+  case $UI in
+    gum)
+      gum input --placeholder "$prompt" --value "$def"
+      ;;
+    whiptail)
+      whiptail --title "$TITLE" --inputbox "$prompt" 10 60 "$def" 3>&1 1>&2 2>&3
+      ;;
+    dialog)
+      dialog --title "$TITLE" --inputbox "$prompt" 10 60 "$def" 3>&1 1>&2 2>&3
+      ;;
+  esac
+}
+
+spin_run() {
+  if [ "$UI" = gum ] && have gum; then
+    gum spin --spinner line --title "$*" -- "$@"
+  else
+    "$@"
+  fi
+}
+
+sites_list() {
+  $SD inventory 2>/dev/null | sed -n 's/^platform=\([^ ]*\) product=\([^ ]*\).*/\1 \2/p'
+}
+
+pick_site() {
+  items=$(sites_list)
+  if [ -z "$items" ]; then
+    echo "$PROG: no products (stardust inventory is empty)" >&2
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  set -- $items
+  pairs=""
+  while [ $# -ge 2 ]; do
+    pairs="$pairs $1/$2"
+    shift 2
+  done
+  # shellcheck disable=SC2086
+  pick "platform/product" $pairs
+}
+
+run_site() {
+  verb=$1
+  extra=${2:-}
+  pair=$(pick_site) || return 0
+  plat=${pair%/*}
+  prod=${pair#*/}
+  echo "+ $SD $verb $plat $prod $extra"
+  # shellcheck disable=SC2086
+  $SD $verb $plat $prod $extra
+  pause
+}
+
+MAIN="
+doctor
+list
+inventory
+log
+last
+site-check
+site-backup
+site-restore
+site-disable
+site-enable
+platform-upgrade
+promote-test
+promote-live
+site-delete
+backup-all
+quit
+"
+
+while :; do
+  # shellcheck disable=SC2086
+  choice=$(pick "Stardust  ($UI)" $MAIN) || exit 0
+  case $choice in
+    doctor) $SD doctor; pause ;;
+    list) $SD list; pause ;;
+    inventory) $SD inventory; pause ;;
+    log) $SD log 20; pause ;;
+    last) $SD last; pause ;;
+    site-check) run_site site-check ;;
+    site-backup) run_site site-backup ;;
+    site-restore)
+      pair=$(pick_site) || continue
+      plat=${pair%/*}
+      prod=${pair#*/}
+      echo "+ $SD site-restore $plat $prod"
+      $SD site-restore "$plat" "$prod"
+      pause
+      ;;
+    site-disable) run_site site-disable ;;
+    site-enable) run_site site-enable ;;
+    platform-upgrade)
+      plats=$($SD inventory 2>/dev/null | sed -n 's/^platform=\([^ ]*\).*/\1/p' | sort -u)
+      if [ -z "$plats" ]; then
+        echo "no platforms"; pause; continue
+      fi
+      # shellcheck disable=SC2086
+      p=$(pick "platform to upgrade" $plats) || continue
+      echo "+ $SD platform-upgrade $p"
+      $SD platform-upgrade "$p"
+      pause
+      ;;
+    promote-test)
+      name=$(ask "platform name (ecom, not ecom-test)" "ecom") || continue
+      echo "+ $SD promote $name --to test"
+      $SD promote "$name" --to test
+      pause
+      ;;
+    promote-live)
+      name=$(ask "platform name" "ecom") || continue
+      if confirm "promote $name --to live ?"; then
+        $SD promote "$name" --to live
+      fi
+      pause
+      ;;
+    site-delete)
+      pair=$(pick_site) || continue
+      plat=${pair%/*}
+      prod=${pair#*/}
+      if confirm "DELETE $plat/$prod (backup first; live needs --force)?"; then
+        $SD site-delete "$plat" "$prod" || $SD site-delete --force "$plat" "$prod"
+      fi
+      pause
+      ;;
+    backup-all)
+      $SD backup-all
+      pause
+      ;;
+    quit|"") exit 0 ;;
+  esac
+done

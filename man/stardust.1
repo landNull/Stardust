@@ -1,0 +1,607 @@
+.TH STARDUST 1 "16 September 2026" "starhq.knarr" "System Administration"
+.SH NAME
+stardust \- manage Backdrop platforms and sites from the shell
+.SH SYNOPSIS
+.B stardust
+.RB [ \-n ]
+.I command
+.RI [ args... ]
+.PP
+.B stardust
+.BR \-h | \-\-help | help
+.SH DESCRIPTION
+.B stardust
+is the command-line control plane for Backdrop CMS on
+.B starhq.knarr
+and the VPS.
+It is the piece that replaces Drupal Aegir / BOA
+.I without
+a PHP hosting panel.
+.PP
+Think of three layers:
+.IP \(bu 3
+A
+.B platform
+is one Backdrop codebase under
+.B /srv/platforms/NAME
+(Git tree, shared core, modules, themes).
+.IP \(bu 3
+A
+.B product
+(also called a site) is one website inside that tree:
+its own database, files, and config.
+Example: platform
+.B ecom
+holds products
+.B thq
+and
+.B kl .
+.IP \(bu 3
+An
+.B environment
+is which machine and Git branch you are on:
+.B devel
+(knarr or a laptop),
+.B test
+or
+.B live
+(VPS).
+.PP
+.B stardust
+creates platforms and products, wires Bee and
+.BR crdir (1),
+writes the Apache name, and creates the MariaDB user.
+Day-to-day content and config still go through
+.BR bee (1)
+with
+.B \-\-root
+and
+.B \-\-site .
+.PP
+Do
+.I not
+type
+.B sudo stardust
+(exit 2).
+Log in as the operator account
+(or
+.BR deploy )
+and run the wrapper.
+Root work goes through
+.B /usr/local/sbin/stardust-priv
+only
+(path allowlist under
+.B /srv/platforms
+and
+.BR /srv/stardust ,
+DB names
+.BR bd_* ).
+.PP
+The daily operator
+(the login that ran
+.B stardust-install.sh ,
+or
+.B \-H NAME )
+must be in groups
+.B www-admin
+and
+.BR stardust .
+After
+.B usermod \-aG
+use
+.B exec su \- $USER
+.
+.B exec bash
+does
+.I not
+refresh groups.
+.PP
+PHP-writable trees are
+.B www-data:www-admin
+plus default POSIX ACLs.
+Secrets are
+.B deploy:stardust
+mode 0640
+(Apache is
+.I not
+in
+.BR stardust ).
+.SH OPTIONS
+.TP
+.B \-n
+Dry run.
+Print each action with a leading
+.B +
+and change nothing.
+Use this the first time you run any mutating command.
+.TP
+.BR \-h ", " \-\-help ", " help
+Print the same new-admin help that is in this manual's
+.B EXAMPLES
+section.
+.SH COMMANDS
+.SS doctor
+Check that this box is ready:
+users
+.BR deploy ,
+.BR www-admin ,
+and the operator login
+.RB ( \-H
+or the user who ran the installer);
+groups
+.B www-admin
+and
+.BR stardust ;
+.B stardust-priv
+and
+.BR setfacl ;
+directories under
+.B /srv/stardust
+and
+.BR /srv/platforms ,
+and that
+.BR bee ,
+.BR crdir ,
+Apache, PHP, and MariaDB are on PATH.
+CSF and WireGuard are notes, not failures.
+.SS list
+Walk
+.B /srv/platforms
+and print each platform, its Git branch, and the product folders
+that already have settings.
+.SS env
+Print the values loaded from
+.B ~/.stardust.conf
+or
+.BR /etc/stardust.conf .
+Useful when a command used the wrong role or path.
+.SS platform-add NAME
+Create
+.BI /srv/platforms/ NAME \fR.
+.TP
+.BI \-\-git " URL"
+Clone that Git remote (Gitea).
+.TP
+.BI \-\-branch " BRANCH"
+Branch to check out after clone.
+Default: the role in
+.B STARDUST_ROLE
+(usually
+.BR devel ).
+.PP
+With no
+.B \-\-git ,
+.B bee dl-core web
+builds a fresh Backdrop tree.
+If the directory already exists, the command stops and leaves it alone.
+.SS site-add PLATFORM PRODUCT
+Add one product inside an existing platform.
+.TP
+.BI \-\-host " HOST"
+Hostname Apache and Backdrop should answer
+(default:
+.BI PRODUCT . ROLE \fR,
+for example
+.BR thq.devel ).
+.TP
+.BI \-\-name " TITLE"
+Site name passed to
+.B bee install
+(default:
+.IB PRODUCT " " ROLE \fR).
+.TP
+.BI \-\-pass " PASS"
+MariaDB password.
+If omitted, a random password is stored in
+.B /srv/stardust/state/secrets/PLATFORM/PRODUCT
+and
+.B PRODUCT.cnf
+(not printed).
+MariaDB create reads the
+.B .cnf
+so the password is not on
+.BR argv .
+.PP
+What
+.B site-add
+does, in order:
+.IP 1. 4
+.B crdir \-s \-o www-data \-g www-admin
+on
+.BR files/PRODUCT ,
+.BR files_private/PRODUCT ,
+.B config/PRODUCT/active
+.IP 2. 4
+.B crdir
+(no
+.BR \-s )
+on
+.B config/PRODUCT/staging
+.IP 3. 4
+Copy and patch
+.B web/sites/PRODUCT/settings.php
+with the Backdrop path overrides
+.IP 4. 4
+Append
+.B $sites['HOST'] = 'PRODUCT'
+to
+.B web/sites/sites.php
+.IP 5. 4
+Write
+.B settings.local.php
+(database DSN + trusted host).
+An existing file is
+.I not
+overwritten.
+.IP 6. 4
+.B CREATE DATABASE
+and
+.B CREATE USER
+on localhost only.
+Name:
+.BI bd_ PRODUCT _ ROLE
+.IP 7. 4
+.B bee \-\-root=.../web \-\-site=PRODUCT install \-\-auto
+.IP 8. 4
+Create or extend
+.BI /etc/apache2/sites-available/ PLATFORM \- ROLE .conf
+and reload Apache
+.SH FILES
+.TP
+.B /etc/stardust.conf
+System defaults written by
+.BR stardust-install.sh .
+.TP
+.B /etc/php/*/fpm/conf.d/35-stardust-harden.ini
+FPM and apache2 only.
+.B disable_functions
+(passthru, popen, proc_*, dl, pcntl_*),
+live/test
+.B opcache.validate_timestamps=0 .
+Not applied to CLI.
+.TP
+.B /etc/php/*/cli/conf.d/35-stardust-cli.ini
+CLI only. No
+.BR disable_functions
+so
+.B bee
+still works.
+.TP
+.B /etc/apt/apt.conf.d/52stardust-unattended
+Security updates only;
+.B Automatic-Reboot
+is
+.BR false .
+.TP
+.B /etc/msmtprc
+You write this after install so
+.B NOTIFY=
+can send mail via
+.BR msmtp-mta .
+.PP
+Host packages the installer pulls on Devuan/Debian include
+.BR apache2-utils ,
+.BR php-intl ,
+.BR php-bcmath ,
+.BR php-imagick ,
+.BR php-apcu ,
+.BR mariadb-backup ,
+.BR logwatch ,
+.BR goaccess ,
+.BR etckeeper ,
+.BR smartmontools ,
+.BR irqbalance ,
+.BR haveged ,
+.BR moreutils ,
+.BR jq ,
+.BR pv ,
+and
+.BR age .
+.TP
+.B ~/.stardust.conf
+Per-user override
+.RB ( deploy
+and
+.BR www-admin ).
+.TP
+.B /srv/stardust
+Control plane: backups, state, extra binaries.
+.TP
+.B /srv/platforms
+Backdrop checkouts.
+Never run devel, test, and live out of one working copy.
+.TP
+.B /etc/csf/csf.conf
+Optional CSF policy from
+.B stardust-install.sh \-F .
+SSH is not world-open; use WireGuard
+.B 10.8.0.0/24
+or LAN
+.BR 192.168.1.0/24 .
+.SH ENVIRONMENT
+.TP
+.B STARDUST_CONF
+If set, load this file instead of the usual conf search.
+.TP
+.B STARDUST_ROLE
+.BR devel ", " test ", or " live .
+Picks default branch, default hostname suffix, and database suffix.
+.SH FIRST HOUR ON A NEW BOX
+.IP 1. 4
+Copy the artifacts folder onto the machine
+.RI ( crdir ,
+.BR stardust ,
+.B stardust-install.sh
+must sit next to each other).
+.IP 2. 4
+Preview, then install the host:
+.PP
+.RS
+laptop:
+.B ./stardust-install.sh \-n \-\-localhost
+.PP
+knarr:
+.B ./stardust-install.sh \-n \-m devel
+.PP
+VPS:
+.B ./stardust-install.sh \-n \-m test
+(or
+.BR \-m live )
+.RE
+.IP 3. 4
+Run the same command without
+.BR \-n .
+Set passwords:
+.B sudo passwd deploy
+,
+.B sudo passwd www-admin
+, and
+.B sudo passwd
+on the operator login
+then
+.B exec su \- $USER
+.IP 4. 4
+.B stardust doctor
+must print READY.
+.IP 5. 4
+Add a platform, then each product, always with
+.B \-n
+first.
+.SH EXAMPLES
+.SS See whether this machine is ready
+.nf
+stardust doctor
+stardust env
+stardust list
+.fi
+.SS Dry-run a new empty platform (no Git yet)
+.nf
+stardust \-n platform-add scratch
+stardust platform-add scratch
+.fi
+.PP
+Bee downloads Backdrop core into
+.BR /srv/platforms/scratch/web .
+.SS Clone ecom from Gitea onto knarr (devel)
+.nf
+stardust \-n platform-add ecom \e
+  \-\-git git@gitea-starhq:ORG/ecom.git \e
+  \-\-branch devel
+stardust platform-add ecom \e
+  \-\-git git@gitea-starhq:ORG/ecom.git \e
+  \-\-branch devel
+.fi
+.SS Add the two ecom products on knarr
+.nf
+stardust \-n site-add ecom thq \-\-host thq.devel \-\-name "THQ devel"
+stardust site-add ecom thq \-\-host thq.devel \-\-name "THQ devel"
+stardust site-add ecom kl  \-\-host kl.devel  \-\-name "KL devel"
+.fi
+.PP
+Open
+.B http://thq.devel
+and
+.B http://kl.devel
+(dnsmasq on knarr and on
+.B \-\-localhost
+maps
+.B *.devel
+for you).
+.SS Same products on the VPS test checkout
+The VPS uses a
+.I second
+working copy, not the knarr tree.
+.nf
+# on the VPS, role=test in /etc/stardust.conf
+stardust platform-add ecom-test \e
+  \-\-git git@gitea-starhq:ORG/ecom.git \e
+  \-\-branch test
+stardust site-add ecom-test thq \-\-host thq.smll.dev
+stardust site-add ecom-test kl  \-\-host kl.smll.dev
+.fi
+.SS Live hostnames
+.nf
+stardust site-add ecom-live thq \-\-host thehomeschoolquest.com
+stardust site-add ecom-live kl  \-\-host keslerlumber.com
+.fi
+.PP
+Cloudflare in front of the VPS: Flexible origin is HTTP only.
+Full (strict) needs an origin certificate; that is not
+.B site-add .
+.SS After the site exists \- Bee, not Stardust
+.nf
+bee \-\-root=/srv/platforms/ecom/web \-\-site=thq status
+bee \-\-root=/srv/platforms/ecom/web \-\-site=thq cc all
+bee \-\-root=/srv/platforms/ecom/web \-\-site=thq config-export
+bee \-\-root=/srv/platforms/ecom/web \-\-site=kl  updb
+.fi
+.PP
+A Bee command without
+.B \-\-site
+on a multisite tree may pick the wrong product.
+.SS Feature worktree on knarr
+.B newfeature
+is a separate tool.
+From a site root:
+.nf
+cd /srv/platforms/ecom/web/sites/thq
+newfeature maps
+.fi
+.SS Backup, restore, clone, smoke check
+.nf
+stardust \-n site-backup ecom thq
+stardust site-backup ecom thq
+stardust site-restore ecom thq
+stardust site-restore \-\-from /srv/stardust/backups/ecom/thq/devel/20260916-210000 ecom thq
+stardust site-clone ecom thq ecom thq-copy \-\-host thq-copy.devel
+stardust site-check ecom thq \-\-host thq.devel
+stardust backup-all
+.fi
+.SS Upgrade and promote (VPS)
+.nf
+# knarr: commit + push devel, merge to test on Gitea
+# VPS:
+stardust \-n promote ecom \-\-to test
+stardust promote ecom \-\-to test
+stardust promote ecom \-\-to live
+stardust platform-upgrade ecom-test
+stardust log 20
+stardust last
+.fi
+.PP
+.B promote
+refuses to run when
+.B STARDUST_ROLE
+is
+.BR devel .
+Fast-forward only; a diverged branch is an error, not a merge.
+.SS Maintenance and cron
+.nf
+stardust site-disable ecom thq
+stardust site-enable ecom thq
+stardust \-n cron-all
+.fi
+.PP
+The installer writes
+.B /etc/cron.d/stardust
+(nightly
+.B backup-all
+at 03:15, Bee cron four times an hour).
+.SS Stardust itself as a Gitea repo (laptop first)
+The CLI is its own private repo. It is not a Backdrop platform.
+Do not
+.B platform-add stardust .
+.nf
+# Gitea UI: ORG/stardust, empty, private
+cd /path/to/artifacts
+git init && git checkout -B devel
+git add stardust-install.sh stardust stardust.1 stardust-lib \e
+  crdir crdir.1 newfeature stardust-tutorial.txt .gitignore
+git commit -m "stardust CLI"
+git remote add origin git@gitea-starhq:ORG/stardust.git
+git remote -v
+ssh -T git@gitea-starhq
+git push -u origin devel
+# later from this laptop:
+git push
+# same as: git push origin devel
+.fi
+.PP
+On knarr or the VPS:
+.nf
+git clone -b devel git@gitea-starhq:ORG/stardust.git /home/deploy/stardust
+cd /home/deploy/stardust
+./stardust-install.sh \-n \-m devel
+.fi
+.SS Host install variants
+.nf
+# laptop, 127.0.0.1 only, dnsmasq on, no CSF, no certbot
+./stardust-install.sh \-n \-\-localhost
+./stardust-install.sh \-\-localhost
+.fi
+.nf
+# knarr devel + optional CSF (SSH only via WireGuard / LAN)
+./stardust-install.sh \-n \-m devel
+./stardust-install.sh \-F \-m devel
+.fi
+.nf
+# VPS: no dnsmasq (public DNS), certbot yes
+./stardust-install.sh \-n \-m test
+./stardust-install.sh \-F \-m live
+.fi
+.SH WORDS YOU WILL SEE
+.TP
+.B deploy
+Unix account that owns Git trees and runs Bee.
+.TP
+.B www-admin
+Human login that can write the same 0770 trees.
+.TP
+.B www-data
+Apache/PHP daemon group.
+.TP
+.B Bee
+Backdrop's Drush replacement.
+Always
+.B \-\-root=/srv/platforms/PLATFORM/web \-\-site=PRODUCT .
+.TP
+.B crdir
+Creates files/config dirs as
+.B deploy:www-data
+mode 0770.
+.B \-s
+is setgid for files that PHP also writes.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.B doctor
+prints READY.
+.B site-check
+prints OK.
+.TP
+.B 1
+Understood the arguments but could not finish:
+missing platform or product, Bee/git/MariaDB failure,
+dirty tree or diverged branch on
+.BR promote ,
+failed
+.B site-check
+after upgrade,
+lock already held,
+or
+.B doctor
+NOT READY.
+.TP
+.B 2
+Usage error: unknown flag, missing argument,
+.B \-\-to devel ,
+or
+.B promote
+on a host whose role is
+.BR devel .
+.PP
+Mutating commands also write
+.B rc=
+on the last line of
+.B stardust last .
+.SH BUGS
+.B site-delete
+is still not implemented.
+A failed
+.B site-check
+after upgrade does not auto-restore; use
+.B site-restore
+by hand.
+.SH SEE ALSO
+.BR crdir (1),
+.BR bee (1),
+.BR apache2 (8),
+.B stardust-install.sh
+.PP
+Tutorials in the artifacts folder:
+.BR stardust-tutorial.txt ,
+.BR ecom-multisite-tutorial.txt ,
+.BR ecom-test-live-filesystem-tutorial.docx .
+.SH AUTHOR
+Written for the starhq.knarr Backdrop platforms layout.

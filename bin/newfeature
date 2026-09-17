@@ -1,0 +1,229 @@
+#!/bin/sh
+# newfeature — provision an ecom (or other platform) Git worktree preview
+# Must be run from a site root, e.g.:
+#   /srv/platforms/ecom/thq
+#   /srv/platforms/ecom/web/sites/thq
+#
+#   newfeature
+#   newfeature maps
+
+set -eu
+
+PLATFORMS=${PLATFORMS:-/srv/platforms}
+OWNER=${OWNER:-deploy}
+GROUP=${GROUP:-www-data}
+MODE=${MODE:-0770}
+
+if [ "$(id -u)" -ne 0 ]; then
+  SUDO="sudo"
+else
+  SUDO=""
+fi
+
+here=$(pwd -P)
+
+# Resolve platform + site from cwd.
+# Accepted site roots:
+#   $PLATFORMS/<platform>/<site>
+#   $PLATFORMS/<platform>/web/sites/<site>
+# Also accepted: any subdirectory of those.
+platform=""
+site=""
+
+case $here in
+  "$PLATFORMS"/*)
+    rest=${here#"$PLATFORMS"/}
+    platform=${rest%%/*}
+    after=${rest#*/}
+    if [ "$after" = "$rest" ] || [ -z "$after" ]; then
+      after=""
+    fi
+    case $after in
+      web/sites/*)
+        site=${after#web/sites/}
+        site=${site%%/*}
+        ;;
+      web|web/*|"")
+        site=""
+        ;;
+      *)
+        site=${after%%/*}
+        ;;
+    esac
+    ;;
+esac
+
+if [ -z "$platform" ] || [ -z "$site" ] || [ "$site" = "web" ] || [ "$site" = "sites" ]; then
+  echo "Error: Must be in a site root to addfeature." >&2
+  echo "  example: $PLATFORMS/ecom/thq" >&2
+  echo "       or: $PLATFORMS/ecom/web/sites/thq" >&2
+  echo "  cwd: $here" >&2
+  exit 1
+fi
+
+ROOT="$PLATFORMS/$platform"
+if [ ! -e "$ROOT/.git" ]; then
+  echo "Error: Must be in a site root to addfeature." >&2
+  echo "  $ROOT is not a git checkout" >&2
+  exit 1
+fi
+
+if [ -n "${1:-}" ]; then
+  featureName=$1
+else
+  printf "featureName: "
+  read -r featureName
+fi
+
+featureName=$(printf '%s' "$featureName" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')
+featureName=$(printf '%s' "$featureName" | sed 's/^-*//;s/-*$//')
+
+if [ -z "$featureName" ]; then
+  echo "newfeature: featureName is required (letters, numbers, hyphen)" >&2
+  exit 1
+fi
+
+slug=$featureName
+HOST="$slug.$site.devel"
+WT="$ROOT-$slug"
+BRANCH="feature/$slug"
+DB="bd_${site}_$slug"
+DBUSER=$(printf '%s' "$DB" | cut -c1-32)
+CONF="/etc/apache2/sites-available/${HOST}.conf"
+DEVEL_DB="bd_${site}_devel"
+
+printf "Create a new feature %s [Y,n] " "$HOST"
+read -r confirm
+confirm=${confirm:-Y}
+case $confirm in
+  Y|y|yes) ;;
+  *) echo "aborted."; exit 0 ;;
+esac
+
+echo "platform    $platform"
+echo "site        $site"
+echo "featureName $featureName"
+echo "url         http://$HOST"
+echo "worktree    $WT"
+echo "branch      $BRANCH"
+echo
+
+printf "mysql password for new site user (empty = generate): "
+read -r dbpass
+if [ -z "$dbpass" ]; then
+  dbpass=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)
+  echo "generated password: $dbpass"
+fi
+
+printf "clone %s into %s? [Y,n]: " "$DEVEL_DB" "$DB"
+read -r cloneq
+cloneq=${cloneq:-Y}
+
+$SUDO -u "$OWNER" git -C "$ROOT" fetch origin 2>/dev/null || true
+
+if [ ! -d "$WT" ]; then
+  if $SUDO -u "$OWNER" git -C "$ROOT" show-ref --verify --quiet "refs/heads/$BRANCH" \
+     || $SUDO -u "$OWNER" git -C "$ROOT" show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+    $SUDO -u "$OWNER" git -C "$ROOT" worktree add "$WT" "$BRANCH"
+  else
+    $SUDO -u "$OWNER" git -C "$ROOT" worktree add -b "$BRANCH" "$WT" devel
+  fi
+fi
+
+$SUDO install -d -o "$OWNER" -g "$GROUP" -m "$MODE" \
+  "$WT/files/$site" \
+  "$WT/files_private/$site" \
+  "$WT/config/$site/active" \
+  "$WT/config/$site/staging"
+
+$SUDO chmod g+s \
+  "$WT/files/$site" \
+  "$WT/files_private/$site" \
+  "$WT/config/$site/active"
+
+if [ -d "$ROOT/files/$site" ]; then
+  $SUDO rsync -a "$ROOT/files/$site/" "$WT/files/$site/" || true
+fi
+$SUDO chown -R "$OWNER:$GROUP" "$WT/files/$site" "$WT/files_private/$site" "$WT/config/$site" 2>/dev/null || true
+
+SITES="$WT/web/sites/sites.php"
+if [ -f "$SITES" ]; then
+  if ! grep -q "$HOST" "$SITES"; then
+    $SUDO -u "$OWNER" tee -a "$SITES" >/dev/null <<EOF
+
+\$sites['$HOST'] = '$site';
+EOF
+  fi
+fi
+
+dest="$WT/web/sites/$site/settings.local.php"
+hostre=$(printf '%s' "$HOST" | sed 's/\./\\\\./g')
+$SUDO tee "$dest" >/dev/null <<EOF
+<?php
+\$database = 'mysql://$DBUSER:$dbpass@localhost/$DB';
+\$settings['trusted_host_patterns'] = array(
+  '^$hostre\$',
+);
+\$config['system.core']['preprocess_css'] = FALSE;
+\$config['system.core']['preprocess_js']  = FALSE;
+EOF
+$SUDO chown "$OWNER:$GROUP" "$dest"
+$SUDO chmod 640 "$dest"
+
+$SUDO mysql -u root <<SQL
+CREATE DATABASE IF NOT EXISTS \`$DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+CREATE USER IF NOT EXISTS '$DBUSER'@'localhost' IDENTIFIED BY '$dbpass';
+GRANT ALL ON \`$DB\`.* TO '$DBUSER'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+
+case $cloneq in
+  Y|y|yes)
+    $SUDO mysqldump "$DEVEL_DB" 2>/dev/null | $SUDO mysql "$DB" || echo "newfeature: skip clone $DEVEL_DB"
+    ;;
+esac
+
+$SUDO tee "$CONF" >/dev/null <<EOF
+<VirtualHost *:80>
+    ServerName $HOST
+    DocumentRoot $WT/web
+
+    <Directory $WT/web>
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    <Directory $WT/config>
+        Require all denied
+    </Directory>
+    <Directory $WT/files_private>
+        Require all denied
+    </Directory>
+
+    ErrorLog  \${APACHE_LOG_DIR}/$HOST-error.log
+    CustomLog \${APACHE_LOG_DIR}/$HOST-access.log combined
+</VirtualHost>
+EOF
+$SUDO a2ensite "$(basename "$CONF")"
+$SUDO /etc/init.d/apache2 reload
+
+echo
+echo "========================================"
+echo "newfeature: $HOST ready"
+echo "========================================"
+echo "urls"
+echo "  http://$HOST"
+echo "platform   $platform"
+echo "site       $site"
+echo "worktree   $WT"
+echo "branch     $BRANCH"
+echo "docroot    $WT/web"
+echo "vhost      $CONF"
+echo "database   $DB  user $DBUSER"
+echo "password   $dbpass"
+echo
+echo "git    cd $WT && git push -u origin $BRANCH"
+echo "bee    bee --root=$WT/web --site=$site status"
+echo
+echo "Add $HOST to DNS or /etc/hosts → knarr."
+echo "For the other product, cd to that site root and run newfeature $slug again."

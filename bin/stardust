@@ -1,0 +1,218 @@
+#!/bin/sh
+# stardust — thin dispatcher. Logic lives in stardust-lib/*.sh
+# Do not sudo this wrapper.
+
+set -eu
+
+PROG=${0##*/}
+DRYRUN=0
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
+  echo "$PROG: do not run this with sudo or as root." >&2
+  echo "$PROG: log in as your operator account (or deploy / www-admin) and run: $PROG …" >&2
+  echo "$PROG: the wrapper calls sudo -n only for the few root steps." >&2
+  exit 2
+fi
+
+find_lib() {
+  for d in \
+    "${STARDUST_LIB:-}" \
+    "$HERE/lib" \
+    "$HERE/../lib" \
+    "$HERE/stardust-lib" \
+    /usr/local/lib/stardust \
+    /srv/stardust/lib
+  do
+    if [ -n "$d" ] && [ -f "$d/common.sh" ]; then
+      echo "$d"
+      return 0
+    fi
+  done
+  return 1
+}
+
+LIBDIR=$(find_lib) || {
+  echo "$PROG: cannot find lib/common.sh. Clone the stardust repo and run ./stardust-install.sh from its root." >&2
+  exit 1
+}
+
+# shellcheck disable=SC1091
+. "$LIBDIR/common.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/ops.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/doctor.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/site.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/backup.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/check.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/platform.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/clone.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/promote.sh"
+
+usage() {
+  cat <<EOF
+$PROG 0.3.0 — manage Backdrop platforms and sites from the shell
+          (Aegir/BOA replacement, no PHP panel)
+
+  Do not type "sudo $PROG" — refused (exit 2). Use -n before mutating commands.
+
+  $PROG doctor | list | env | help | log [N] | last
+  $PROG [-n] platform-add NAME [--git URL] [--branch BRANCH]
+  $PROG [-n] platform-upgrade PLATFORM [--no-pull]
+  $PROG inventory
+  $PROG [-n] promote PLATFORM --to test|live
+  $PROG [-n] site-add PLATFORM PRODUCT [--host HOST] [--name TITLE] [--pass PASS]
+  $PROG [-n] site-backup PLATFORM PRODUCT
+  $PROG [-n] site-restore [--from DIR] PLATFORM PRODUCT
+  $PROG [-n] site-clone SRC_PLAT SRC_PROD DEST_PLAT DEST_PROD [--host HOST]
+  $PROG [-n] site-check PLATFORM PRODUCT [--host HOST]
+  $PROG [-n] site-disable PLATFORM PRODUCT
+  $PROG [-n] site-enable PLATFORM PRODUCT
+  $PROG [-n] site-delete PLATFORM PRODUCT [--force]
+  $PROG [-n] backup-all
+  $PROG [-n] cron-all
+  stardust-menu          # gum / whiptail / dialog
+  stardust-tui           # Bubble Tea full-screen; same verbs
+
+  log / last        task journal ($STARDUST_ROOT/state/tasks.log)
+  promote           ff-only origin/test|live on the VPS checkout, then upgrade
+  backup-all        every product; prune to KEEP_BACKUPS (default 7)
+  cron-all          bee --site=PRODUCT cron, staggered (installer cron.d)
+  site-disable      bee maintenance-mode 1
+  secrets           $STARDUST_ROOT/state/secrets/<plat>/<prod> 0640 deploy:stardust
+                    (+ .cnf for mysql --defaults-extra-file; Apache cannot read)
+  groups            required: www-admin stardust
+                    recommended: adm deploy
+                    refresh: exec su - $USER   (exec bash does NOT work)
+  sudo              refused if you prefix this wrapper. Root work is
+                    /usr/local/sbin/stardust-priv only.
+  PHP ini           30-stardust all SAPIs; 35-stardust-harden FPM only;
+                    35-stardust-cli keeps Bee exec
+  host extras       intl/imagick/apcu, mariadb-backup, logwatch, goaccess,
+                    etckeeper, smartd, unattended-upgrades (no reboot),
+                    msmtp-mta (needs /etc/msmtprc for NOTIFY)
+
+EXIT STATUS
+  0  ok (doctor READY, site-check OK)
+  1  ran, but failed (missing tree, git/Bee/DB, dirty promote,
+     check failed, lock held, doctor NOT READY)
+  2  usage (bad flag, missing args, promote --to devel / on devel host)
+
+EXAMPLES
+  git remote add origin git@gitea-starhq:ORG/stardust.git
+  git push -u origin devel
+  git push origin devel
+  git clone -b devel git@gitea-starhq:ORG/stardust.git ~/stardust
+  cd ~/stardust && ./stardust-install.sh -n --localhost
+
+  $PROG doctor
+  $PROG -n platform-add ecom --git git@gitea-starhq:ORG/ecom.git --branch devel
+  $PROG site-add ecom thq --host thq.devel
+  $PROG site-backup ecom thq
+  $PROG site-check ecom thq --host thq.devel
+  $PROG site-restore --from $STARDUST_ROOT/backups/ecom/thq/devel/STAMP ecom thq
+  $PROG site-clone ecom thq ecom thq-copy --host thq-copy.devel
+  $PROG -n promote ecom --to test          # on the VPS only
+  $PROG promote ecom --to live
+  $PROG log 20
+  $PROG last
+  $PROG backup-all
+  $PROG inventory
+  $PROG site-disable ecom thq && $PROG site-enable ecom thq
+  $PROG -n site-delete ecom thq-copy
+  stardust-menu
+  stardust-tui
+  id                    # confirm www-admin stardust
+  exec su - "$USER"     # after usermod -aG (not exec bash)
+
+  man $PROG     $PROG -h
+  lib: $LIBDIR
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    -n) DRYRUN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) echo "$PROG: unknown flag $1" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+case $cmd in
+  help) ;;
+  doctor|list|env|log|last|inventory)
+    check_operator_groups || true
+    ;;
+  *)
+    if ! check_operator_groups; then
+      echo "$PROG: refusing $cmd until required groups are set" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+dispatch() {
+  case $cmd in
+    help) usage ;;
+    doctor) cmd_doctor ;;
+    list) cmd_list ;;
+    env) cmd_env ;;
+    log) cmd_log "$@" ;;
+    last) cmd_last ;;
+    platform-add) cmd_platform_add "$@" ;;
+    platform-upgrade) cmd_platform_upgrade "$@" ;;
+    promote) cmd_promote "$@" ;;
+    site-add) cmd_site_add "$@" ;;
+    site-backup) cmd_site_backup "$@" ;;
+    site-restore) cmd_site_restore "$@" ;;
+    site-clone) cmd_site_clone "$@" ;;
+    site-check) cmd_site_check "$@" ;;
+    site-disable) cmd_site_disable "$@" ;;
+    site-enable) cmd_site_enable "$@" ;;
+    site-delete) cmd_site_delete "$@" ;;
+    inventory) cmd_inventory ;;
+    backup-all) cmd_backup_all ;;
+    cron-all) cmd_cron_all ;;
+    *)
+      echo "$PROG: unknown command '$cmd'" >&2
+      usage >&2
+      return 2
+      ;;
+  esac
+}
+
+case $cmd in
+  platform-upgrade|site-restore|promote|backup-all|site-delete)
+    if with_lock mutate dispatch "$@"; then
+      task_log "$cmd $*" 0
+    else
+      rc=$?
+      task_log "$cmd $*" "$rc"
+      exit "$rc"
+    fi
+    ;;
+  site-add|site-backup|site-clone|site-check|site-disable|site-enable|cron-all|platform-add)
+    if dispatch "$@"; then
+      task_log "$cmd $*" 0
+    else
+      rc=$?
+      task_log "$cmd $*" "$rc"
+      exit "$rc"
+    fi
+    ;;
+  *)
+    dispatch "$@"
+    ;;
+esac

@@ -1,0 +1,165 @@
+# shellcheck shell=sh
+
+write_gitignore() {
+  dest=$1
+  if [ -f "$dest" ]; then
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $dest"
+    return 0
+  fi
+  cat > "$dest" <<'EOF'
+web/sites/*/settings.local.php
+files/
+files_private/
+config/*/active/
+*.sql
+.DS_Store
+EOF
+}
+
+cmd_platform_add() {
+  name=${1:-}
+  shift || true
+  giturl=""
+  branch=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --git) giturl=$2; shift 2 ;;
+      --branch) branch=$2; shift 2 ;;
+      *) echo "$PROG: unknown flag $1" >&2; exit 2 ;;
+    esac
+  done
+  name=$(slug "$name")
+  if [ -z "$name" ]; then
+    echo "usage: $PROG platform-add NAME [--git URL] [--branch BRANCH]" >&2
+    exit 2
+  fi
+  if [ -z "$branch" ]; then
+    branch=$STARDUST_ROLE
+  fi
+
+  dest=$PLATFORMS/$name
+  if [ -e "$dest" ] && [ "$DRYRUN" -eq 0 ]; then
+    echo "$PROG: $dest already exists — not touching it"
+    echo "Add a product with: $PROG site-add $name PRODUCT"
+    return 0
+  fi
+
+  run_root mkdir -p "$PLATFORMS"
+  if [ -n "$giturl" ]; then
+    run_root git clone --branch "$branch" "$giturl" "$dest" || run_root git clone "$giturl" "$dest"
+  else
+    run_root mkdir -p "$dest"
+    run_root chown "$OWNER:$GROUP" "$dest"
+    bee=$(bee_bin)
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ $bee --root=$dest dl-core web"
+    else
+      as_root -u "$OWNER" "$bee" --root="$dest" dl-core web
+    fi
+  fi
+
+  run_root chown -R "$OWNER:$GROUP" "$dest"
+  write_gitignore "$dest/.gitignore"
+
+  if [ "$DRYRUN" -eq 0 ] && [ ! -e "$dest/.git" ]; then
+    as_root -u "$OWNER" git -C "$dest" init
+    as_root -u "$OWNER" git -C "$dest" checkout -B "$branch" 2>/dev/null || true
+  fi
+
+  echo "platform $name ready at $dest"
+  echo "next: $PROG site-add $name <product> [--host host.example]"
+}
+
+list_products() {
+  web=$1
+  if [ ! -d "$web/sites" ]; then
+    return 0
+  fi
+  for s in "$web/sites"/*; do
+    [ -d "$s" ] || continue
+    base=${s##*/}
+    case $base in default|all) continue ;; esac
+    if [ -f "$s/settings.php" ] || [ -f "$s/settings.local.php" ]; then
+      printf '%s\n' "$base"
+    fi
+  done
+}
+
+cmd_platform_upgrade() {
+  nopull=0
+  name=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --no-pull) nopull=1; shift ;;
+      *)
+        if [ -z "$name" ]; then name=$1; shift; else
+          echo "$PROG: unknown arg $1" >&2; exit 2
+        fi
+        ;;
+    esac
+  done
+  name=$(slug "$name")
+  if [ -z "$name" ]; then
+    echo "usage: $PROG platform-upgrade PLATFORM [--no-pull]" >&2
+    exit 2
+  fi
+  root=$PLATFORMS/$name
+  web=$root/web
+  if [ ! -d "$web" ]; then
+    echo "$PROG: no platform $root" >&2
+    exit 1
+  fi
+
+  products=$(list_products "$web")
+  if [ -z "$products" ]; then
+    echo "$PROG: no products under $web/sites" >&2
+    exit 1
+  fi
+
+  echo "upgrade $name — backup every product first"
+  run_hooks pre-upgrade "$name"
+  for product in $products; do
+    cmd_site_backup "$name" "$product" || {
+      echo "$PROG: backup failed for $product — upgrade aborted" >&2
+      exit 1
+    }
+  done
+
+  if [ "$STARDUST_ROLE" = live ] || [ "$STARDUST_ROLE" = test ]; then
+    for product in $products; do
+      mm_set "$web" "$product" 1
+    done
+  fi
+
+  if [ "$nopull" -eq 1 ]; then
+    echo "upgrade $name --no-pull"
+  elif [ "$DRYRUN" -eq 1 ]; then
+    echo "+ git -C $root pull --ff-only"
+  else
+    if [ -e "$root/.git" ]; then
+      as_root -u "$OWNER" git -C "$root" pull --ff-only
+    else
+      note "$root is not a git checkout — skip pull"
+    fi
+  fi
+
+  fail=0
+  for product in $products; do
+    bee_yes --root="$web" --site="$product" updb
+    bee_yes --root="$web" --site="$product" config-import || true
+    cmd_site_check "$name" "$product" || {
+      echo "$PROG: site-check failed for $product after upgrade" >&2
+      echo "$PROG: site was NOT auto-restored" >&2
+      fail=1
+    }
+    mm_set "$web" "$product" 0
+    chown_files "$root/files/$product" "$root/files_private/$product" "$root/config/$product/active" 2>/dev/null || true
+  done
+  if [ "$fail" -ne 0 ]; then
+    exit 1
+  fi
+  echo "upgrade $name done"
+}

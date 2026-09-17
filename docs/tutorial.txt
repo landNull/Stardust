@@ -1,0 +1,627 @@
+# Stardust — install the host, then run the CLI
+
+system:
+  os: Devuan (sysvinit) on knarr; any Debian-family or similar on a laptop / VPS
+  hostname: starhq.knarr
+  cpu: 8-core AMD FX-8320E
+  ram: 32GB
+  storage: 2x1TB SSD RAID 1
+  stack: Apache + PHP + MariaDB + Bee + crdir
+  control: /srv/stardust
+  sites:   /srv/platforms
+  no PHP panel  (this is the Aegir / BOA replacement)
+
+--------------------------------------------------------------------
+0. Words before any command
+--------------------------------------------------------------------
+
+  platform   one Backdrop codebase
+             /srv/platforms/ecom
+             shared core, modules, themes
+
+  product    one website inside that codebase
+             thq and kl both live in ecom
+             each has its own DB, files, config
+
+  environment
+             devel  = knarr, or a laptop with --localhost
+             test   = VPS checkout /srv/platforms/ecom-test
+             live   = VPS checkout /srv/platforms/ecom-live
+             Never run all three out of one working copy.
+
+  deploy     Unix user that owns Git and runs Bee
+  www-admin  extra human login AND the file group on every tree
+  operator   daily login. Default: who ran the installer
+             (SUDO_USER / USER). Override with -H NAME.
+             Groups: www-admin, stardust, adm, deploy.
+             After usermod: exec su - $USER
+             (exec bash / exec zsh do NOT refresh groups)
+  www-data   Apache / PHP daemon user; also in group www-admin
+  stardust   group for secrets + operator (NOT www-data)
+
+  ownership
+             files/, files_private/, config/*/active
+               www-data:www-admin + setgid + default ACL
+             code, staging, /srv/stardust
+               deploy:www-admin + default ACL
+             secrets
+               deploy:stardust 0640 + .cnf
+               Apache cannot read this directory
+
+  stardust-priv
+             /usr/local/sbin/stardust-priv
+             the only NOPASSWD root helper
+             paths only under /srv/platforms and /srv/stardust
+             DB names must start with bd_
+
+  Bee        Backdrop CLI (not Drush)
+             always: bee --root=/srv/platforms/PLATFORM/web --site=PRODUCT …
+
+  crdir      mkdir + chown + 0770
+             site-add uses -s -o www-data -g www-admin on PHP trees
+
+Do not type "sudo stardust", "sudo stardust-menu", or "sudo stardust-tui"
+(exit 2). The wrapper calls sudo -n /usr/local/sbin/stardust-priv only.
+
+Always run a mutating command once with -n first.
+-n prints each action with a leading + and changes nothing.
+
+--------------------------------------------------------------------
+1. What you copy onto the machine
+--------------------------------------------------------------------
+
+Clone the tools repo (not a Backdrop platform). Layout:
+
+  stardust-install.sh     run from the repo root
+  bin/                    stardust, stardust-priv, stardust-menu, crdir, newfeature
+  lib/                    modules sourced by bin/stardust
+  man/                    stardust.1 crdir.1
+  docs/tutorial.txt
+  conf/stardust-settings.json
+  tui/                    Bubble Tea source (optional; no binary in git)
+
+On the box:
+
+  chmod +x stardust-install.sh bin/*
+  ./stardust-install.sh -n -m devel
+
+Help after install:
+
+  stardust -h
+  stardust --help
+  man stardust          # after the installer has run
+  man ./stardust.1      # from this folder, before install
+  man crdir
+
+--------------------------------------------------------------------
+1b. Put Stardust itself in Gitea (localhost first)
+--------------------------------------------------------------------
+
+Stardust is a repo of TOOLS, not a Backdrop platform.
+Do not run "stardust platform-add stardust".
+Do not put /srv/platforms or /srv/stardust/state/secrets in this repo.
+
+What belongs in git@gitea-starhq:ORG/stardust.git
+
+  stardust-install.sh
+  stardust
+  stardust.1
+  stardust-lib/*.sh
+  stardust-settings.json
+  stardust-tutorial.txt
+  crdir  crdir.1
+  newfeature
+
+What does NOT belong
+
+  /srv/stardust/state/secrets/
+  /srv/stardust/state/tasks.log
+  /srv/stardust/backups/
+  /srv/platforms/
+  settings.local.php from any site
+
+On the Gitea web UI (same instance as ecom):
+
+  New repository
+    Owner:     ORG          (same org as ecom / torg)
+    Name:      stardust
+    Visibility: private
+    Init:      empty (no README from the UI if you already have files)
+
+On the laptop, after a --localhost install (or from this artifacts folder
+before install):
+
+  cd /path/to/the/folder/that/holds/stardust-install.sh
+  printf '%s\n' \
+    '/srv/' \
+    'state/secrets/' \
+    'state/tasks.log' \
+    'backups/' \
+    '*.sql' \
+    '.DS_Store' > .gitignore
+
+  git init
+  git checkout -B devel
+  git add stardust-install.sh stardust stardust.1 stardust-lib \
+    stardust-settings.json stardust-tutorial.txt \
+    crdir crdir.1 newfeature .gitignore
+  git status
+  git commit -m "stardust CLI + installer + lib"
+
+  # first time only — name the remote
+  git remote add origin git@gitea-starhq:ORG/stardust.git
+
+  # if you already added origin and need to point it again:
+  # git remote set-url origin git@gitea-starhq:ORG/stardust.git
+
+  git remote -v
+  # origin  git@gitea-starhq:ORG/stardust.git (fetch)
+  # origin  git@gitea-starhq:ORG/stardust.git (push)
+
+  ssh -T git@gitea-starhq
+  # must succeed as YOUR Gitea user (not deploy)
+
+  # first push of branch devel (sets upstream)
+  git push -u origin devel
+
+  # every later commit from this laptop
+  git add -u
+  git commit -m "describe the change"
+  git push
+  # same as: git push origin devel
+
+If Gitea created a README and the first push is rejected
+("updates were rejected because the remote contains work"):
+
+  git fetch origin
+  git pull --rebase origin devel
+  git push -u origin devel
+
+Do not git push --force on this repo unless you are sure
+nothing else has commits you need.
+
+If SSH works but push asks for a password, you are hitting
+HTTPS by mistake. The remote MUST start with git@ not https://
+
+  git remote set-url origin git@gitea-starhq:ORG/stardust.git
+  git push -u origin devel
+
+On knarr or the VPS you clone the tools, then run the installer
+from that clone so ship_tools sees stardust-lib next to the script:
+
+  sudo -u deploy -H git clone \
+    -b devel \
+    git@gitea-starhq:ORG/stardust.git \
+    /home/deploy/stardust
+  cd /home/deploy/stardust
+  ./stardust-install.sh -n -m devel     # knarr
+  ./stardust-install.sh -n --localhost  # another laptop
+
+Updates later:
+
+  cd /home/deploy/stardust
+  git pull --ff-only
+  ./stardust-install.sh -n -m devel
+  ./stardust-install.sh -m devel
+
+That re-ships /usr/local/bin/stardust and /usr/local/lib/stardust.
+It does not touch /srv/platforms.
+
+--------------------------------------------------------------------
+2. Install the host  (stardust-install.sh)
+--------------------------------------------------------------------
+
+Pick ONE profile. Preview, then run for real.
+
+2a. Laptop / local dev only  (127.0.0.1)
+
+  ./stardust-install.sh -n --localhost
+  ./stardust-install.sh --localhost
+
+  Same flag: -lh
+
+  Does:
+    deploy + www-admin, Apache, PHP, MariaDB on 127.0.0.1
+    Bee, crdir, newfeature, stardust
+    dnsmasq  address=/devel/127.0.0.1
+    Listen 127.0.0.1:80
+
+  Skips:
+    CSF, WireGuard policy, certbot
+
+2b. knarr  (devel, LAN 192.168.1.120 + WireGuard 10.8.0.1)
+
+  ./stardust-install.sh -n -m devel
+  ./stardust-install.sh -m devel
+
+  Optional firewall (SSH only via WG 10.8.0.0/24 and LAN 192.168.1.0/24):
+
+  ./stardust-install.sh -n -F -m devel
+  ./stardust-install.sh -F -m devel
+
+  First CSF pass sets TESTING=1 so a lockout undoes itself.
+  After WG SSH still works:
+
+    sudo sed -i 's/^TESTING = .*/TESTING = "0"/' /etc/csf/csf.conf
+    sudo csf -r
+
+  dnsmasq on knarr: address=/devel/192.168.1.120
+
+2c. VPS test
+
+  ./stardust-install.sh -n -m test
+  ./stardust-install.sh -m test
+
+  No dnsmasq (public DNS / Cloudflare).
+  certbot is offered.
+  Optional: add -F for CSF. Public inbound is 80+443 and UDP 51820.
+  SSH is still not world-open.
+  test/live also write /etc/sysctl.d/60-stardust.conf (BBR if the
+  kernel has it; ip_forward=1 for WireGuard), Apache ServerTokens Prod,
+  and nofile 65535 for www-data. Rose weekly snapshots are not a CMS
+  backup — keep backup-all. Do not open MariaDB 3306 on the public NIC.
+
+2d. VPS live
+
+  ./stardust-install.sh -n -m live
+  ./stardust-install.sh -F -m live
+
+What every profile does
+  creates deploy, www-admin; operator = invoking login or -H NAME
+  puts operator in www-admin,stardust,adm,deploy; www-data in www-admin
+  /srv/stardust + /srv/platforms 2770 deploy:www-admin + default ACL
+  secrets dir 0750 deploy:stardust (no www-data)
+  /etc/stardust.conf and ~/.stardust.conf for deploy, www-admin, operator
+  PHP drop-in + optional one php-fpm pool as www-data + mpm_event
+  PHP split: 30-stardust.ini all SAPIs; 35-stardust-harden.ini FPM/apache2
+    (disable_functions; live/test opcache.validate_timestamps=0)
+    35-stardust-cli.ini — no disable_functions so Bee can exec
+  PHP extras: intl bcmath imagick apcu
+  apache2-utils (ab), mariadb-backup, jq, pv, moreutils, age
+  logwatch, goaccess, etckeeper (/etc git), smartmontools, irqbalance, haveged
+  unattended-upgrades (security pocket, Automatic-Reboot false)
+  needrestart, msmtp-mta (put /etc/msmtprc before NOTIFY= works)
+  MariaDB bind 127.0.0.1; root stays unix_socket (do not SET PASSWORD)
+  git safe.directory /srv/platforms for deploy
+  sudoers: NOPASSWD stardust-priv + bee/git/crdir as deploy only
+  ships stardust, stardust-priv, stardust-menu, stardust-tui if built
+
+After any profile
+
+  sudo passwd deploy
+  sudo passwd www-admin
+  sudo passwd "$USER"
+  exec su - "$USER"
+  id    # must list www-admin and stardust
+  # put SSH keys in each ~/.ssh/authorized_keys
+
+The installer does not set passwords and does not invent keys.
+
+--------------------------------------------------------------------
+3. Prove the box is ready
+--------------------------------------------------------------------
+
+  stardust doctor
+  stardust env
+  stardust list
+
+doctor must print READY before you add platforms.
+env shows the role (devel/test/live) loaded from conf.
+list is empty until you add a platform.
+
+If doctor fails:
+  bee / crdir not on PATH  → re-run the installer from the folder
+                             that contains those files
+  user deploy missing      → installer did not finish; run it again
+  /srv/platforms missing   → same
+  missing group www-admin  → sudo usermod -aG www-admin,stardust "$USER"
+                             then: exec su - "$USER"
+  ACL mask effective r--   → sudo -n /usr/local/sbin/stardust-priv setacl /srv/platforms
+
+Front-ends (same verbs, no extra privileges):
+
+  stardust-menu     # gum, else whiptail, else dialog
+  stardust-tui      # Bubble Tea; STARDUST_BIN overrides the CLI path
+
+  sudo apt-get install -y gum     # nicer menu; optional
+
+--------------------------------------------------------------------
+4. stardust commands
+--------------------------------------------------------------------
+
+Global flag (before the command name):
+
+  -n     dry run
+  -h     help  (also: --help   or   stardust help)
+
+4.1  stardust doctor
+     Check users, dirs, bee, crdir, Apache, PHP, MariaDB.
+     CSF and WireGuard are notes, not failures.
+
+       stardust doctor
+
+4.2  stardust env
+     Print STARDUST_ROLE, paths, Bee binary, Apache reload command.
+
+       stardust env
+
+4.3  stardust list
+     Walk /srv/platforms. Print branch + product folders
+     that already have settings.php.
+
+       stardust list
+
+4.4  stardust platform-add NAME [--git URL] [--branch BRANCH]
+
+     Creates /srv/platforms/NAME.
+     Existing directory is left alone.
+
+     Fresh Backdrop (no Git yet):
+
+       stardust -n platform-add scratch
+       stardust platform-add scratch
+
+     Clone ecom from Gitea onto knarr:
+
+       stardust -n platform-add ecom \
+         --git git@gitea-starhq:ORG/ecom.git \
+         --branch devel
+       stardust platform-add ecom \
+         --git git@gitea-starhq:ORG/ecom.git \
+         --branch devel
+
+     Default --branch is STARDUST_ROLE from conf (devel on knarr).
+
+4.5  stardust site-add PLATFORM PRODUCT [--host HOST] [--name TITLE] [--pass PASS]
+
+     Adds one product inside an existing platform.
+
+     Does, in order:
+       crdir -s  files/PRODUCT files_private/PRODUCT config/PRODUCT/active
+       crdir     config/PRODUCT/staging
+       settings.php path overrides
+       sites.php map  $sites['HOST'] = 'PRODUCT'
+       settings.local.php  (not overwritten if present)
+       CREATE DATABASE + USER  bd_PRODUCT_ROLE @ localhost
+       bee --site=PRODUCT install --auto
+       Apache vhost PLATFORM-ROLE.conf + reload
+
+     Default --host is PRODUCT.ROLE  e.g. thq.devel
+     Default --pass is generated and printed once. Save it.
+
+     knarr, two products on ecom:
+
+       stardust -n site-add ecom thq --host thq.devel --name "THQ devel"
+       stardust site-add ecom thq --host thq.devel --name "THQ devel"
+       stardust site-add ecom kl  --host kl.devel  --name "KL devel"
+
+     Browse http://thq.devel and http://kl.devel
+     (dnsmasq on knarr and --localhost maps *.devel).
+
+--------------------------------------------------------------------
+5. Worked example — knarr ecom from zero
+--------------------------------------------------------------------
+
+  # 1 host
+  ./stardust-install.sh -n -m devel
+  ./stardust-install.sh -m devel
+  sudo passwd deploy
+  stardust doctor
+
+  # 2 platform
+  stardust -n platform-add ecom \
+    --git git@gitea-starhq:ORG/ecom.git --branch devel
+  stardust platform-add ecom \
+    --git git@gitea-starhq:ORG/ecom.git --branch devel
+
+  # 3 products
+  stardust site-add ecom thq --host thq.devel --name "THQ devel"
+  stardust site-add ecom kl  --host kl.devel  --name "KL devel"
+
+  # 4 confirm
+  stardust list
+  bee --root=/srv/platforms/ecom/web --site=thq status
+  bee --root=/srv/platforms/ecom/web --site=kl  status
+
+If ecom already exists under /srv/platforms/ecom, skip platform-add
+and only run site-add for a product that is not there yet.
+
+--------------------------------------------------------------------
+6. Worked example — VPS test
+--------------------------------------------------------------------
+
+  ./stardust-install.sh -n -m test
+  ./stardust-install.sh -m test
+  stardust doctor
+
+  # second checkout — not the knarr path
+  stardust platform-add ecom-test \
+    --git git@gitea-starhq:ORG/ecom.git --branch test
+
+  stardust site-add ecom-test thq --host thq.smll.dev
+  stardust site-add ecom-test kl  --host kl.smll.dev
+
+No dnsmasq. Point Cloudflare / public DNS at the VPS.
+
+Live is the same with -m live, path ecom-live, branch live,
+hosts thehomeschoolquest.com and keslerlumber.com.
+
+  stardust platform-add ecom-live \
+    --git git@gitea-starhq:ORG/ecom.git --branch live
+  stardust site-add ecom-live thq --host thehomeschoolquest.com
+  stardust site-add ecom-live kl  --host keslerlumber.com
+
+Cloudflare Flexible = HTTP origin, no certbot required for Apache.
+Full (strict) = origin cert; that is outside site-add.
+
+--------------------------------------------------------------------
+7. Worked example — laptop
+--------------------------------------------------------------------
+
+  # 0 tools from Gitea (section 1b) or from a copy of artifacts
+  git clone -b devel git@gitea-starhq:ORG/stardust.git ~/stardust
+  cd ~/stardust
+
+  ./stardust-install.sh -n --localhost
+  ./stardust-install.sh --localhost
+  sudo passwd "$USER"
+  exec su - "$USER"
+  stardust doctor
+
+  # 1 site code is a DIFFERENT repo
+  stardust platform-add ecom \
+    --git git@gitea-starhq:ORG/ecom.git --branch devel
+  stardust site-add ecom thq --host thq.devel
+
+  # http://thq.devel should hit 127.0.0.1:80
+
+If the distro Apache still has a stock "Listen 80" on all
+addresses, disable that so only stardust-localhost.conf
+(Listen 127.0.0.1:80) remains.
+
+--------------------------------------------------------------------
+8. After the site exists — Bee, not Stardust
+--------------------------------------------------------------------
+
+Stardust builds the box and the first install.
+Everything else is Bee with --site.
+
+  bee --root=/srv/platforms/ecom/web --site=thq status
+  bee --root=/srv/platforms/ecom/web --site=thq cc all
+  bee --root=/srv/platforms/ecom/web --site=thq updb
+  bee --root=/srv/platforms/ecom/web --site=thq config-export
+  bee --root=/srv/platforms/ecom/web --site=kl  config-import
+  bee --root=/srv/platforms/ecom/web --site=thq db-export /tmp/thq.sql
+
+A Bee command without --site on a multisite tree may pick
+the wrong product.
+
+Promote code: commit on devel, merge devel → test → live in Gitea,
+pull the matching checkout on the VPS, then updb + config-import
+per product. That workflow is in ecom-multisite-tutorial.txt.
+
+--------------------------------------------------------------------
+9. newfeature (separate tool, shipped by the installer)
+--------------------------------------------------------------------
+
+From a site root on knarr:
+
+  cd /srv/platforms/ecom/web/sites/thq
+  newfeature maps
+
+Creates a Git worktree, feature hostname, and DB clone.
+See the script header in artifacts/newfeature.
+
+--------------------------------------------------------------------
+10. crdir by hand
+--------------------------------------------------------------------
+
+You rarely need this if you used site-add. When you do:
+
+  crdir -n -s \
+    /srv/platforms/ecom/files/thq \
+    /srv/platforms/ecom/files_private/thq \
+    /srv/platforms/ecom/config/thq/active
+
+  crdir -n \
+    /srv/platforms/ecom/config/thq/staging
+
+-s on files, files_private, config/*/active.
+No -s on config/*/staging (Git only).
+man crdir
+
+--------------------------------------------------------------------
+11. Ops: backup, check, promote, journal, cron
+--------------------------------------------------------------------
+
+  # smoke test after an upgrade
+  stardust -n site-check ecom thq --host thq.devel
+  stardust site-check ecom thq --host thq.devel
+
+  # one product
+  stardust -n site-backup ecom thq
+  stardust site-backup ecom thq
+  stardust site-restore ecom thq
+  stardust site-restore --from /srv/stardust/backups/ecom/thq/devel/20260916-210000 ecom thq
+
+  # copy a product (new hostname)
+  stardust site-clone ecom thq ecom thq-copy --host thq-copy.devel
+
+  # every product on this box (also nightly via /etc/cron.d/stardust)
+  stardust backup-all
+
+  # VPS only — knarr role=devel will refuse
+  stardust -n promote ecom --to test
+  stardust promote ecom --to test
+  stardust promote ecom --to live
+
+  # same as promote's second half, if git is already current
+  stardust platform-upgrade ecom-test
+
+  # task journal
+  stardust log 20
+  stardust last
+
+  # maintenance
+  stardust site-disable ecom thq
+  stardust site-enable ecom thq
+
+  # Bee cron by hand (installer already schedules cron-all)
+  stardust -n cron-all
+
+DB passwords live in /srv/stardust/state/secrets/<platform>/<product>
+mode 0640 deploy:www-data — site-add does not print them.
+
+site-delete is not built. A failed site-check does not auto-restore.
+
+Exit status:
+  0  succeeded (doctor READY, site-check OK)
+  1  understood the command, could not finish
+     missing platform/product, Bee/git/MariaDB failed,
+     promote dirty tree or non-ff branch, site-check failed,
+     mutate lock held, doctor NOT READY
+  2  usage
+     unknown flag, missing args, promote --to devel,
+     or promote on a host whose role is devel
+
+  echo $?
+  stardust last          # mutating commands also log rc=
+
+--------------------------------------------------------------------
+12. Common mistakes
+--------------------------------------------------------------------
+
+  sudo stardust
+    Don't. The wrapper sudoes the few root steps.
+
+  One working copy for devel + test + live
+    Don't. Separate checkouts: ecom, ecom-test, ecom-live.
+
+  Bee without --site
+    Wrong product, or Bee refuses.
+
+  Putting $database in settings.php
+    That file is committed. DSN belongs in settings.local.php.
+
+  Overwriting settings.local.php
+    site-add will not. If the DSN is wrong, edit the file.
+
+  CSF -F before WireGuard works
+    Stay on TESTING=1 until you can SSH via 10.8.0.1.
+
+  dnsmasq on the VPS
+    The installer will not install it for -m test or -m live.
+    Use public DNS.
+
+  stardust promote on knarr
+    Role devel refuses. Push from knarr, promote on the VPS.
+
+--------------------------------------------------------------------
+13. See also
+--------------------------------------------------------------------
+
+  man stardust
+  man crdir
+  artifacts/stardust-settings.json
+  artifacts/ecom-multisite-tutorial.txt
+  artifacts/ecom-test-live-filesystem-tutorial.docx

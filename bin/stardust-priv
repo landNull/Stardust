@@ -1,0 +1,153 @@
+#!/bin/sh
+# stardust-priv — the only root helper Stardust should sudo.
+# Allowlisted paths and verbs. Do not give operators NOPASSWD chown/rm/mysql.
+# Invoked as: sudo -n /usr/local/sbin/stardust-priv VERB [args]
+
+set -eu
+
+PROG=${0##*/}
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "$PROG: must run as root (via sudo -n)" >&2
+  exit 1
+fi
+
+OWNER=${OWNER:-deploy}
+GROUP=${GROUP:-www-admin}
+DAEMON=${DAEMON:-www-data}
+OPGRP=${OPGRP:-stardust}
+PLATFORMS=${PLATFORMS:-/srv/platforms}
+STARDUST_ROOT=${STARDUST_ROOT:-/srv/stardust}
+
+if [ -f /etc/stardust.conf ]; then
+  # shellcheck disable=SC1091
+  . /etc/stardust.conf
+fi
+
+path_ok() {
+  p=$1
+  case $p in
+    "$PLATFORMS"|"$PLATFORMS"/*|"$STARDUST_ROOT"|"$STARDUST_ROOT"/*) return 0 ;;
+    *)
+      echo "$PROG: refuse path $p" >&2
+      return 1
+      ;;
+  esac
+}
+
+ident_ok() {
+  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_]+$'
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+
+case $cmd in
+  chown-files)
+    [ $# -gt 0 ] || exit 2
+    for p in "$@"; do path_ok "$p" || exit 1; done
+    chown -R "$DAEMON:$GROUP" "$@"
+    ;;
+  chown-code)
+    [ $# -gt 0 ] || exit 2
+    for p in "$@"; do path_ok "$p" || exit 1; done
+    chown -R "$OWNER:$GROUP" "$@"
+    ;;
+  chown-secret)
+    [ $# -gt 0 ] || exit 2
+    for p in "$@"; do path_ok "$p" || exit 1; done
+    chown -R "$OWNER:$OPGRP" "$@"
+    chmod 0640 "$@" 2>/dev/null || true
+    ;;
+  chmod)
+    mode=$1
+    shift
+    printf '%s' "$mode" | grep -Eq '^[0-7]{3,4}$' || exit 2
+    [ $# -gt 0 ] || exit 2
+    for p in "$@"; do path_ok "$p" || exit 1; done
+    chmod "$mode" "$@"
+    ;;
+  mkdir)
+    [ $# -gt 0 ] || exit 2
+    for p in "$@"; do path_ok "$p" || exit 1; done
+    mkdir -p "$@"
+    ;;
+  setacl)
+    [ $# -gt 0 ] || exit 2
+    for p in "$@"; do path_ok "$p" || exit 1; done
+    if ! command -v setfacl >/dev/null 2>&1; then
+      echo "$PROG: setfacl missing (install acl)" >&2
+      exit 1
+    fi
+    for p in "$@"; do
+      setfacl -m "u:${OWNER}:rwx,g:${GROUP}:rwx,u:${DAEMON}:rwx,o::---" "$p" 2>/dev/null || true
+      if [ -d "$p" ]; then
+        setfacl -d -m "u:${OWNER}:rwx,g:${GROUP}:rwx,u:${DAEMON}:rwx,o::---" "$p" 2>/dev/null || true
+      fi
+    done
+    ;;
+  setacl-secret)
+    [ $# -gt 0 ] || exit 2
+    for p in "$@"; do path_ok "$p" || exit 1; done
+    if command -v setfacl >/dev/null 2>&1; then
+      for p in "$@"; do
+        setfacl -b "$p" 2>/dev/null || true
+        setfacl -m "u:${OWNER}:rwx,g:${OPGRP}:r-x,o::---" "$p" 2>/dev/null || true
+        if [ -d "$p" ]; then
+          setfacl -d -m "u:${OWNER}:rw,g:${OPGRP}:r,o::---" "$p" 2>/dev/null || true
+        fi
+      done
+    fi
+    ;;
+  apache-reload)
+    if [ -x /etc/init.d/apache2 ]; then
+      /etc/init.d/apache2 reload
+    elif [ -x /etc/init.d/httpd ]; then
+      /etc/init.d/httpd reload
+    elif command -v systemctl >/dev/null 2>&1; then
+      systemctl reload apache2 2>/dev/null || systemctl reload httpd
+    else
+      echo "$PROG: no apache reload" >&2
+      exit 1
+    fi
+    ;;
+  a2ensite)
+    name=${1:-}
+    printf '%s' "$name" | grep -Eq '^[A-Za-z0-9._-]+$' || exit 2
+    a2ensite "$name"
+    ;;
+  mysql-create)
+    db=$1 user=$2 cnf=$3
+    ident_ok "$db" && ident_ok "$user" || exit 2
+    printf '%s' "$db" | grep -q '^bd_' || {
+      echo "$PROG: db name must start with bd_" >&2
+      exit 1
+    }
+    path_ok "$cnf" || exit 1
+    [ -f "$cnf" ] || { echo "$PROG: missing $cnf" >&2; exit 1; }
+    pass=$(sed -n 's/^password=//p' "$cnf" | head -n 1)
+    [ -n "$pass" ] || { echo "$PROG: no password= in $cnf" >&2; exit 1; }
+    mysql -e "CREATE DATABASE IF NOT EXISTS \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    mysql -e "CREATE USER IF NOT EXISTS '$user'@'localhost' IDENTIFIED BY '$pass';"
+    mysql -e "GRANT ALL ON \`$db\`.* TO '$user'@'localhost'; FLUSH PRIVILEGES;"
+    ;;
+  mysql-drop)
+    db=$1 user=$2
+    ident_ok "$db" && ident_ok "$user" || exit 2
+    printf '%s' "$db" | grep -q '^bd_' || exit 1
+    mysql -e "DROP DATABASE IF EXISTS \`$db\`;"
+    mysql -e "DROP USER IF EXISTS '$user'@'localhost'; FLUSH PRIVILEGES;"
+    ;;
+  tail-log)
+    f=$1
+    case $f in
+      /var/log/apache2/*|/var/log/httpd/*) ;;
+      *) echo "$PROG: refuse log $f" >&2; exit 1 ;;
+    esac
+    tail -n 20 "$f"
+    ;;
+  *)
+    echo "usage: $PROG chown-files|chown-code|chown-secret|chmod|mkdir|setacl|setacl-secret|apache-reload|a2ensite|mysql-create|mysql-drop|tail-log" >&2
+    exit 2
+    ;;
+esac

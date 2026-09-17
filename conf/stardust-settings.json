@@ -1,0 +1,255 @@
+{
+  "project": {
+    "name": "Stardust",
+    "version": "0.3.0",
+    "supersedes": "Artix/nginx/pacman/podman draft (Pasted Text 2026-09-16)",
+    "purpose": "CLI control plane that replaces Drupal Aegir / BOA for Backdrop CMS on starhq.knarr. Manages platforms and sites: create, backup, restore, clone, migrate, upgrade, disable, delete. No Aegir frontend.",
+    "goals": [
+      "Migrate leftover Drupal 7 / BOA sites onto Backdrop CMS",
+      "Replicate Aegir verbs without a PHP hosting UI",
+      "Drive everything with POSIX sh + Backdrop Bee (not Drush)",
+      "Reuse tools already on knarr: crdir, newfeature, Apache vhosts, Gitea",
+      "Fit an 8-core AMD FX-8320E, 32 GB RAM, 2x1TB SSD RAID1 box"
+    ],
+    "non_goals": [
+      "Aegir-style task queue / hosting frontend",
+      "Per-site Backdrop core copies",
+      "Nginx on knarr (Apache already serves ecom/torg)",
+      "Rootless Podman as the default runtime (native stack is faster and already running)",
+      "systemd units"
+    ]
+  },
+
+  "environment": {
+    "os": "Devuan Linux",
+    "init": "sysvinit",
+    "hostname": "starhq.knarr",
+    "cpu": "8-core AMD FX-8320E",
+    "ram": "32GB",
+    "storage": {
+      "type": "SSD",
+      "capacity": "1TB",
+      "count": 2,
+      "raid": "RAID 1"
+    },
+    "web_server": "Apache 2 (prefork or event + php module or php-fpm via existing Devuan packages)",
+    "php": "PHP 8.1+ from Devuan/backports as available; Bee-compatible",
+    "database": "MariaDB, bind 127.0.0.1",
+    "dns": {
+      "devel": "dnsmasq or /etc/hosts on knarr: *.devel → 192.168.1.120 (LAN) and 10.8.0.1 (WireGuard)",
+      "test_live": "public DNS + Cloudflare on the VPS",
+      "legacy_wildcards_not_used": "*.star was in the Artix draft; knarr already uses <product>.devel"
+    },
+    "firewall": "CSF on top of iptables. SSH is not world-open: allow 22 only from WireGuard 10.8.0.0/24 and LAN 192.168.1.0/24. UDP 51820 open for WG. HTTP 80 on devel; 80+443 on test/live. Enable with stardust-install.sh -F (TESTING=1 first).",
+    "vpn": {
+      "type": "WireGuard",
+      "subnet": "10.8.0.0/24",
+      "server": "10.8.0.1",
+      "lan": "192.168.1.120",
+      "mode": "split-tunnel SSH first"
+    },
+    "repo_manager": "Gitea (git@gitea-starhq:ORG/<platform>.git)",
+    "editor": "micro",
+    "ide": "Theia optional; not required for CLI",
+    "accounts": {
+      "code_owner": "deploy",
+      "web_user": "www-data",
+      "web_group": "www-data",
+      "dir_mode": "0770",
+      "setgid_on": ["files", "files_private", "config/<site>/active"]
+    }
+  },
+
+  "layout_decision": {
+    "chosen": "Existing knarr Composer-style Backdrop tree under /srv/platforms",
+    "rejected": "Artix draft /srv/www/<uri> → symlink-to-platform (breaks Bee --root/--site and the ecom/torg tutorials already written)",
+    "reason": [
+      "Bee --root=/srv/platforms/<platform>/web --site=<product> already works",
+      "sites.php maps hostnames; one Apache DocumentRoot per environment",
+      "crdir already knows these paths",
+      "No custom settings.php path overrides, no Nginx aliases"
+    ],
+    "structure": {
+      "control_plane": "/srv/stardust",
+      "platforms_root": "/srv/platforms",
+      "platform_checkout": "/srv/platforms/<platform>",
+      "docroot": "/srv/platforms/<platform>/web",
+      "site_settings": "/srv/platforms/<platform>/web/sites/<product>/",
+      "public_files": "/srv/platforms/<platform>/files/<product>/",
+      "private_files": "/srv/platforms/<platform>/files_private/<product>/",
+      "config_active": "/srv/platforms/<platform>/config/<product>/active/",
+      "config_staging": "/srv/platforms/<platform>/config/<product>/staging/",
+      "backups": "/srv/stardust/backups/<platform>/<product>/<env>/",
+      "state": "/srv/stardust/state.json",
+      "conf": "/etc/stardust.conf or /home/deploy/.stardust.conf"
+    },
+    "environment_checkouts": {
+      "knarr_devel": "/srv/platforms/<platform>          branch devel",
+      "vps_test": "/srv/platforms/<platform>-test        branch test",
+      "vps_live": "/srv/platforms/<platform>-live        branch live",
+      "rule": "Never run devel/test/live out of one working copy"
+    }
+  },
+
+  "tenants_already_defined": {
+    "ecom": {
+      "products": ["thq", "kl"],
+      "devel_hosts": ["thq.devel", "kl.devel"],
+      "test_hosts": ["thq.smll.dev", "kl.smll.dev"],
+      "live_hosts": ["thehomeschoolquest.com", "keslerlumber.com"],
+      "dbs_knarr": ["bd_thq_devel", "bd_kl_devel"],
+      "docs": [
+        "artifacts/ecom-multisite-tutorial.txt",
+        "artifacts/ecom-test-live-filesystem-tutorial.docx"
+      ]
+    },
+    "torg": {
+      "status": "tutorial file is currently a copy of ecom; treat as second platform when products are named"
+    }
+  },
+
+  "tools_to_reuse": {
+    "crdir": {
+      "path": "artifacts/crdir + artifacts/crdir.1",
+      "role": "mkdir + chown deploy:www-data + mode 0770 + optional setgid",
+      "rule": "parents mkdir -p only; named dirs get ownership"
+    },
+    "newfeature": {
+      "path": "artifacts/newfeature",
+      "role": "provision a Git worktree preview from a site root"
+    },
+    "bee": {
+      "install": "/usr/local/bin/bee (git install, not Drush)",
+      "invocation": "bee --root=/srv/platforms/<platform>/web --site=<product> <cmd>",
+      "required_flag": "--site is mandatory on multisite"
+    },
+    "apache": {
+      "vhost_pattern": "/etc/apache2/sites-available/<platform>-<env>.conf",
+      "reload": "/etc/init.d/apache2 reload",
+      "one_docroot_per_env": true,
+      "serveralias_for_sibling_products": true
+    },
+    "git": {
+      "host": "gitea-starhq",
+      "branches": ["devel", "test", "live"],
+      "not_in_git": [
+        "web/sites/<product>/settings.local.php",
+        "files/",
+        "files_private/",
+        "config/<product>/active/",
+        "*.sql"
+      ]
+    }
+  },
+
+  "cli": {
+    "name": "stardust",
+    "language": "POSIX sh (same as crdir/newfeature). No Python runtime required on knarr.",
+    "install": "/usr/local/bin/stardust",
+    "config": "~/.stardust.conf",
+    "verbs": {
+      "platform-add": "clone a Backdrop tree into /srv/platforms/<name>, run crdir for known product dirs",
+      "platform-list": "read state.json + disk",
+      "platform-upgrade": "git pull + bee updb per product (after backup)",
+      "site-add": "create DB user, settings.local.php, crdir files/config, bee install, Apache ServerAlias if needed",
+      "site-backup": "bee db-export + tar files + tar private + copy config/active → /srv/stardust/backups/...",
+      "site-restore": "inverse of backup onto a named checkout",
+      "site-clone": "backup source + site-add dest + restore files/db + rewrite trusted_host_patterns",
+      "site-migrate": "clone across platform or env checkouts",
+      "site-disable": "Apache deny + settings flag; keep DB",
+      "site-delete": "require --yes; drop DB, remove site files, leave platform",
+      "site-list": "products × env from state.json",
+      "ssl": "no-op on knarr HTTP devel; on VPS defer to Cloudflare Flexible vs Full (strict) as in ecom tutorial"
+    },
+    "conventions": {
+      "never_sudo_the_wrapper": "script calls sudo only for mkdir/chown/chmod/a2ensite like crdir",
+      "dry_run": "-n on every mutating verb",
+      "db_name": "bd_<product>_<env>",
+      "db_user": "same as db_name, localhost only"
+    }
+  },
+
+  "bootstrap_script": {
+    "name": "stardust-install.sh",
+    "purpose": "Idempotent Devuan setup. Prepares packages, dirs, Bee, conf. Does not wipe existing /srv/platforms/ecom.",
+    "modes": ["knarr-devel (192.168.1.120 + 10.8.0.1)", "vps-test", "vps-live"],
+    "package_manager": "apt-get (Devuan). Not pacman.",
+    "key_actions": [
+      "apt-get update && install: apache2, php, php-mysql, php-xml, php-gd, php-mbstring, php-curl, php-zip, mariadb-server, git, certbot (VPS only), dnsmasq (knarr only)",
+      "MariaDB bind 127.0.0.1; unix_socket for root; per-site users later",
+      "PHP: memory_limit 256M, upload/post 64M, opcache on; keep conservative on FX-8320E",
+      "Install Bee from git to /usr/local/bin/bee if missing",
+      "Install crdir + crdir.1 if missing",
+      "Create /srv/stardust/{backups,bin,state} owned deploy",
+      "Do not recreate /srv/platforms if it already holds ecom",
+      "Write /home/deploy/.stardust.conf",
+      "Apache: do not install a catch-all *.star vhost; keep per-platform env vhosts",
+      "sysvinit: /etc/init.d/apache2 and /etc/init.d/mysql only; no openrc, no systemd"
+    ]
+  },
+
+  "dev_pod_script": {
+    "name": "stardust-pod.sh",
+    "status": "deferred",
+    "reason": "knarr already runs Apache + PHP + MariaDB on the metal. A Podman pod (nginx + php-fpm + mariadb) duplicates RAM and fights the existing DocumentRoot layout. Revisit only if a laptop without Devuan Apache needs an isolated demo.",
+    "if_revived": {
+      "publish": "127.0.0.1:8080:80",
+      "volumes": ["/srv/platforms:/srv/platforms", "/srv/stardust:/srv/stardust"]
+    }
+  },
+
+  "apache_config_highlights": {
+    "pattern": "one VirtualHost per platform+env, ServerName + ServerAlias for each product hostname",
+    "documentroot": "/srv/platforms/<platform>/web",
+    "directory": "AllowOverride All, FollowSymLinks, Require all granted on web/",
+    "deny": ["/srv/platforms/<platform>/config", "/srv/platforms/<platform>/files_private"],
+    "reload": "/etc/init.d/apache2 reload",
+    "not_used": "nginx catch-all regex server_name ~^(?<site>...)\\.(star|devel|test)$"
+  },
+
+  "security": {
+    "settings_local_not_in_git": true,
+    "db_listen": "127.0.0.1 only",
+    "files_mode": "0770 deploy:www-data setgid",
+    "private_files_denied_by_apache": true,
+    "trusted_host_patterns": "exact hostname regex per env",
+    "preprocess_css_js": "off on devel, on on live"
+  },
+
+  "hardware_tuning": {
+    "mysql": {
+      "innodb_buffer_pool_size": "4G-8G (leave headroom for Apache+PHP on 32G)",
+      "innodb_flush_log_at_trx_commit": 2,
+      "note": "MariaDB data lives on RAID1 SSD; do not copy Artix docker volume defaults"
+    },
+    "apache_php": {
+      "max_children": "keep modest; 8 cores share Gitea + MariaDB + Bee",
+      "opcache": true
+    }
+  },
+
+  "migration_from_boa": {
+    "method": "same as ecom tutorial §13",
+    "steps": [
+      "bee/drush db-export on the old tree",
+      "tar files",
+      "copy to knarr over WireGuard (user@10.8.0.1)",
+      "site-add into an existing platform product folder",
+      "rsync files + config/active",
+      "import SQL into bd_<product>_devel",
+      "rewrite settings.php paths; never keep the old $database line",
+      "bee --site=... updb && config-export && cc all",
+      "leave the BOA tree running until the .devel hostname looks right"
+    ]
+  },
+
+  "implementation_order": [
+    "1. Freeze this file as the contract",
+    "2. stardust-install.sh (apt, dirs, Bee, ~/.stardust.conf) — no-op if already present",
+    "3. stardust CLI skeleton: list, backup (wraps bee db-export + tar)",
+    "4. site-add wrapping crdir + bee install + settings.local.php template",
+    "5. clone/migrate/restore",
+    "6. platform-upgrade (git + updb + config-import) with mandatory backup first",
+    "7. Only then consider disable/delete and VPS test/live helpers"
+  ]
+}
