@@ -1,4 +1,4 @@
-.TH STARDUST 1 "16 September 2026" "Stardust" "System Administration"
+.TH STARDUST 1 "17 September 2026" "Stardust" "System Administration"
 .SH NAME
 stardust \- manage Backdrop platforms and sites from the shell
 .SH SYNOPSIS
@@ -246,6 +246,47 @@ Name:
 Create or extend
 .BI /etc/apache2/sites-available/ PLATFORM \- ROLE .conf
 and reload Apache
+.SS d7 VERB
+Drupal 7 / BOA importer. Same code as the portable
+.B d7-migrate
+wrapper (use that on a BOA box that has no Stardust).
+.PP
+Verbs:
+.BR test
+(scan + plan.json + playbook + TUTORIAL.txt),
+.BR apply
+(run automatable plan steps),
+.BR tutorial
+(reprint leftover steps),
+.BR tools ,
+.BR stubs
+(only what the scan found),
+.BR toolkit ,
+.BR prep ,
+.BR assess ,
+.BR convert ,
+.BR attach ,
+.BR theme-patch ,
+.BR cex
+(bee config-export),
+.BR port ,
+.BR all .
+.PP
+Never runs
+.B bee install
+on an imported schema.
+Conversion is
+.B bee \-y update-db
+after the D7 dump is loaded; that write
+.I is
+the JSON config.
+Ubercart / Rules stubs only appear when those modules are enabled.
+Module map:
+.B lib/d7-catalog.txt .
+Handbook:
+.B docs/d7-migration.txt
+and
+.B man d7-migrate .
 .SH FILES
 .TP
 .B /etc/stardust.conf

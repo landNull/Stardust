@@ -500,9 +500,19 @@ write_dropin() {
   echo "wrote $dest"
 }
 
+write_if_absent() {
+  dest=$1
+  if [ -e "$dest" ]; then
+    echo "exists: $dest (unchanged)"
+    return 0
+  fi
+  write_dropin "$dest"
+}
+
 ship_tools() {
   install_tool "$BINDIR/crdir" /usr/local/bin/crdir 0755
   install_tool "$BINDIR/newfeature" /usr/local/bin/newfeature 0755
+  install_tool "$BINDIR/d7-migrate" /usr/local/bin/d7-migrate 0755
   install_tool "$BINDIR/stardust" /usr/local/bin/stardust 0755
   install_tool "$BINDIR/stardust-priv" /usr/local/sbin/stardust-priv 0750
   install_tool "$BINDIR/stardust-menu" /usr/local/bin/stardust-menu 0755
@@ -518,7 +528,7 @@ ship_tools() {
   install_tool "$HERE/stardust-install.sh" /usr/local/sbin/stardust-install.sh 0755
   if [ -d "$LIBSRC" ]; then
     run_root mkdir -p /usr/local/lib/stardust "$STARDUST/lib"
-    for f in "$LIBSRC"/*.sh; do
+    for f in "$LIBSRC"/*.sh "$LIBSRC"/d7-catalog.txt; do
       [ -f "$f" ] || continue
       run_root install -m 0644 "$f" "/usr/local/lib/stardust/$(basename "$f")"
       run_root install -m 0644 "$f" "$STARDUST/lib/$(basename "$f")"
@@ -534,6 +544,22 @@ ship_tools() {
     run_root mkdir -p /usr/local/share/man/man1
     run_root install -m 0644 "$MANDIR/stardust.1" /usr/local/share/man/man1/stardust.1
     echo "installed man stardust"
+  fi
+  if [ -f "$MANDIR/d7-migrate.1" ]; then
+    run_root mkdir -p /usr/local/share/man/man1
+    run_root install -m 0644 "$MANDIR/d7-migrate.1" /usr/local/share/man/man1/d7-migrate.1
+    echo "installed man d7-migrate"
+  fi
+  DOCSRC=""
+  [ -d "$HERE/docs" ] && DOCSRC=$HERE/docs
+  if [ -n "$DOCSRC" ]; then
+    run_root mkdir -p /usr/local/share/stardust/docs "$STARDUST/docs"
+    for f in "$DOCSRC"/*.txt "$DOCSRC"/*.md; do
+      [ -f "$f" ] || continue
+      run_root install -m 0644 "$f" "/usr/local/share/stardust/docs/$(basename "$f")"
+      run_root install -m 0644 "$f" "$STARDUST/docs/$(basename "$f")"
+    done
+    echo "installed docs from $DOCSRC"
   fi
   if [ -x /usr/local/bin/stardust ]; then
     run_root ln -sfn /usr/local/bin/stardust "$STARDUST/bin/stardust"
@@ -809,6 +835,247 @@ EOF
   as_root chown "$OWNER:$GROUP" "$dest"
   as_root chmod 0660 "$dest"
   echo "wrote $dest"
+}
+
+# First-run for packaged extras. Skip when that app already has a config.
+bootstrap_deps() {
+  echo "bootstrap extras (skip when config already exists)"
+
+  if have php-fpm || [ -x /etc/init.d/php-fpm ] || ls /etc/init.d/php*-fpm >/dev/null 2>&1; then
+    for s in php8.2-fpm php8.3-fpm php8.4-fpm php7.4-fpm php-fpm; do
+      if [ -x "/etc/init.d/$s" ] || [ -d "/lib/systemd/system/$s.service" ]; then
+        svc_start "$s"
+        break
+      fi
+    done
+  fi
+
+  if have mysql || have mariadb; then
+    if [ "$DRYRUN" -eq 0 ]; then
+      if mysql -N -e "SELECT 1" >/dev/null 2>&1; then
+        echo "mariadb: local socket OK"
+      else
+        echo "note: mariadb not answering on the unix socket yet — start it, then re-run"
+      fi
+    fi
+  fi
+
+  if have etckeeper; then
+    if [ -d /etc/.git ]; then
+      echo "etckeeper: /etc already a repo (unchanged)"
+    elif [ "$DRYRUN" -eq 1 ]; then
+      echo "+ etckeeper init"
+    else
+      as_root etckeeper init >/dev/null 2>&1 || true
+      as_root etckeeper commit -m "stardust first run" >/dev/null 2>&1 || true
+      echo "etckeeper: initialized /etc"
+    fi
+  fi
+
+  if have needrestart && [ -d /etc/needrestart/conf.d ]; then
+    printf '%s\n' '$nrconf{restart} = "l";' \
+      | write_if_absent /etc/needrestart/conf.d/stardust.conf
+  fi
+
+  if have logwatch; then
+    printf '%s\n' "Detail = Low" "MailTo = root" \
+      | write_if_absent /etc/logwatch/conf/logwatch.conf
+  fi
+
+  if have goaccess && [ ! -f /etc/goaccess/goaccess.conf ]; then
+    echo "note: goaccess installed — run: goaccess /var/log/apache2/access.log"
+  fi
+
+  if have smartd || [ -x /etc/init.d/smartd ] || [ -x /etc/init.d/smartmontools ]; then
+    svc_start smartd 2>/dev/null || svc_start smartmontools 2>/dev/null || true
+  fi
+  if have irqbalance || [ -x /etc/init.d/irqbalance ]; then
+    svc_start irqbalance
+  fi
+  if have haveged || [ -x /etc/init.d/haveged ]; then
+    svc_start haveged
+  fi
+
+  age_key=$STARDUST/state/secrets/age.key
+  if have age-keygen; then
+    if [ -f "$age_key" ]; then
+      echo "age: $age_key exists (unchanged)"
+    elif [ "$DRYRUN" -eq 1 ]; then
+      echo "+ age-keygen -o $age_key"
+    else
+      as_root mkdir -p "$STARDUST/state/secrets"
+      as_root age-keygen -o "$age_key" >/dev/null
+      as_root chown "$OWNER:stardust" "$age_key"
+      as_root chmod 0640 "$age_key"
+      echo "age: wrote $age_key"
+    fi
+  fi
+
+  if have msmtp || have msmtp-mta; then
+    if [ -f /etc/msmtprc ]; then
+      echo "msmtp: /etc/msmtprc exists (unchanged)"
+    else
+      printf '%s\n' \
+        "# Stardust msmtp — fill host/user/password, then: chmod 0640 /etc/msmtprc" \
+        "defaults" \
+        "auth           on" \
+        "tls            on" \
+        "tls_starttls   on" \
+        "logfile        /var/log/msmtp.log" \
+        "account        default" \
+        "host           mail.example" \
+        "port           587" \
+        "from           stardust@example" \
+        "user           stardust@example" \
+        "password       CHANGE-ME" \
+        | write_if_absent /etc/msmtprc.example
+      if [ "$DRYRUN" -eq 0 ] && [ -t 0 ]; then
+        nmail=$(install_prompt "NOTIFY email — where backup/fail mail goes (empty skip)" "" \
+          "Stardust can mail after backup-all or a failed site-check.
+This only sets NOTIFY= in /etc/stardust.conf.
+You still copy /etc/msmtprc.example to /etc/msmtprc and put real SMTP there.")
+        if [ -n "$nmail" ] && [ -f /etc/stardust.conf ]; then
+          if grep -q '^NOTIFY=' /etc/stardust.conf; then
+            as_root sed -i "s|^NOTIFY=.*|NOTIFY=$nmail|" /etc/stardust.conf
+          else
+            as_root sh -c "printf 'NOTIFY=%s\\n' '$nmail' >> /etc/stardust.conf"
+          fi
+          echo "NOTIFY=$nmail — copy /etc/msmtprc.example to /etc/msmtprc and edit SMTP"
+        fi
+      else
+        echo "msmtp: wrote /etc/msmtprc.example (not live until you copy it)"
+      fi
+    fi
+  fi
+
+  if have git && [ "$DRYRUN" -eq 0 ]; then
+    as_root git config --system --get safe.directory "$PLATFORMS" >/dev/null 2>&1 \
+      || as_root git config --system --add safe.directory "$PLATFORMS" || true
+    as_root -u "$OWNER" git config --global init.defaultBranch devel 2>/dev/null || true
+  fi
+
+  if [ "$LOCALHOST" -eq 0 ] && { [ "$ROLE" = test ] || [ "$ROLE" = live ]; }; then
+    if have certbot; then
+      echo "certbot: installed — obtain certs after site-add, not during install"
+    fi
+  fi
+}
+
+install_prompt() {
+  q=$1
+  def=${2:-}
+  help=${3:-}
+  while :; do
+    if [ -n "$help" ]; then
+      printf '%s  (? help)\n' "$q" >&2
+    else
+      printf '%s\n' "$q" >&2
+    fi
+    if [ -n "$def" ]; then
+      printf '> [%s]: ' "$def" >&2
+    else
+      printf '> ' >&2
+    fi
+    IFS= read -r ans || ans=
+    case $ans in
+      \?|help|HELP)
+        printf '\n%s\n\n' "$help"
+        printf 'Enter to return to the question... ' >&2
+        IFS= read -r _ || true
+        continue
+        ;;
+    esac
+    [ -n "$ans" ] || ans=$def
+    printf '%s\n' "$ans"
+    return 0
+  done
+}
+
+gitea_conf_path() {
+  for f in \
+    /etc/gitea/app.ini \
+    /var/lib/gitea/custom/conf/app.ini \
+    /etc/gitea/conf/app.ini \
+    /home/git/gitea/custom/conf/app.ini
+  do
+    if [ -f "$f" ]; then
+      printf '%s\n' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
+gitea_installed() {
+  have gitea && return 0
+  [ -x /usr/local/bin/gitea ] && return 0
+  [ -x /usr/bin/gitea ] && return 0
+  gitea_conf_path >/dev/null && return 0
+  return 1
+}
+
+stardust_git_configured() {
+  for f in "$HOME/.stardust.conf" /etc/stardust.conf; do
+    [ -f "$f" ] || continue
+    val=$(sed -n 's/^STARDUST_GIT_TEMPLATE=//p' "$f" | tail -n 1)
+    case $val in
+      ''|*YOURORG*|*git.example*) ;;
+      *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Devel/localhost only. Never rewrite Gitea app.ini.
+# Fresh box + Gitea present → prompt once. Existing Stardust git template → skip.
+maybe_gitea_defaults() {
+  if [ "$LOCALHOST" -ne 1 ] && [ "$ROLE" != devel ]; then
+    return 0
+  fi
+  if stardust_git_configured; then
+    echo "git template already set — skip Gitea/Stardust git prompts"
+    return 0
+  fi
+  if ! gitea_installed; then
+    echo "Gitea not found on this host — skip git template (set STARDUST_GIT_TEMPLATE later)"
+    return 0
+  fi
+  gc=$(gitea_conf_path || true)
+  echo "Gitea present${gc:+ ($gc)}"
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ prompt STARDUST_GIT_TEMPLATE (Gitea seen, no existing Stardust git config)"
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    echo "no TTY — not prompting for git template"
+    return 0
+  fi
+  host_def=gitea-starhq
+  if [ -f "$HOME/.ssh/config" ]; then
+    h=$(awk 'tolower($1)=="host" && $2 !~ /[*?]/ {
+      if ($2 ~ /gitea|github|gitlab|git/) { print $2; exit }
+    }' "$HOME/.ssh/config" 2>/dev/null || true)
+    [ -n "$h" ] && host_def=$h
+  fi
+  host=$(install_prompt "Git SSH host — name in git@HOST:org/repo.git" "$host_def" \
+    "Accept the scanned default. This is usually a Host line in ~/.ssh/config.
+Empty host skips git template. Type ? here for this text again.")
+  owner=$(install_prompt "Git owner/org — first path after the colon" "" \
+    "On Gitea this is the organization or your username.
+Template becomes git@HOST:OWNER/%s.git  (%s = platform name).")
+  if [ -z "$owner" ]; then
+    echo "no owner — leave STARDUST_GIT_TEMPLATE empty"
+    return 0
+  fi
+  tpl="git@${host}:${owner}/%s.git"
+  dest=/etc/stardust.conf
+  if [ -f "$dest" ] && grep -q '^STARDUST_GIT_TEMPLATE=' "$dest"; then
+    as_root sed -i "s|^STARDUST_GIT_TEMPLATE=.*|STARDUST_GIT_TEMPLATE=$tpl|" "$dest"
+  elif [ -f "$dest" ]; then
+    as_root sh -c "printf 'STARDUST_GIT_TEMPLATE=%s\\n' '$tpl' >> '$dest'"
+  fi
+  echo "wrote STARDUST_GIT_TEMPLATE=$tpl"
+  echo "Gitea app.ini was not changed (already installed)"
 }
 
 write_etc_conf() {
@@ -1210,6 +1477,7 @@ tune_logrotate
 write_state
 write_cron
 write_etc_conf
+maybe_gitea_defaults
 setup_csf
 
 if [ "$DRYRUN" -eq 1 ]; then
@@ -1256,6 +1524,7 @@ if [ "$SVC_DB" = mysql ] && [ "$INIT" != systemd ]; then
     svc_start mariadb
   fi
 fi
+bootstrap_deps
 
 user_conf "$OWNER"
 user_conf "$ADMIN"

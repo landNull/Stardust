@@ -1,0 +1,225 @@
+.TH D7-MIGRATE 1 "17 September 2026" "Stardust" "System Administration"
+.SH NAME
+d7-migrate \- Drupal 7 / BOA to Backdrop on a Stardust host
+.SH SYNOPSIS
+.B stardust
+.RB [ \-n ]
+.B d7
+.I verb
+.RI [ options ]
+.PP
+.B d7-migrate
+.RB [ \-n ]
+.I verb
+.RI [ options ]
+.SH DESCRIPTION
+Convert a Drupal 7 site (often live on a BOA / Aegir VPS) into a
+Backdrop product on knarr.
+.PP
+This is
+.I not
+a Drupal 8+ Migrate API pipeline.
+Backdrop is a Drupal 7 fork.
+The conversion is: import the D7 dump into an empty database, put
+ported modules on disk, then
+.B bee \-y update-db
+(same path as
+.BR core/update.php ).
+Never run
+.B bee install
+on that database.
+.PP
+On knarr,
+.B d7-migrate
+execs
+.B stardust d7
+when Stardust is installed and you are not root.
+On a BOA box it sources
+.B lib/d7.sh
+directly.
+.SH VERBS
+.TP
+.B test SITE
+Scan modules, themes, settings, and inventory.
+Writes
+.BR plan.json ,
+.BR playbook.txt ,
+.BR modules.tsv ,
+.BR steps.tsv ,
+.BR status.tsv ,
+.B TUTORIAL.txt
+under
+.BR \-\-out .
+Ubercart / Rules / Search API steps only if those modules are enabled.
+.TP
+.B apply \-\-plan DIR
+Run automatable steps from the plan.
+.B \-\-step ID
+runs one.
+.B \-\-yes
+skips prompts.
+.B \-n
+prints commands.
+.TP
+.B tutorial \-\-plan DIR
+Reprint the leftover-work tutorial for that site.
+.TP
+.B prep \-\-from SITE
+Snapshot SQL (gzip), public/private files, site modules/themes,
+and BOA
+.B sites/all/modules/{custom,features}
+plus themes and libraries.
+.TP
+.B assess \-\-from SITE|BUNDLE
+Classify enabled projects against
+.BR lib/d7-catalog.txt .
+Exits 1 if an enabled project has no Backdrop port unless
+.B \-\-force .
+.TP
+.B convert \-\-from BUNDLE \-\-platform NAME \-\-product NAME
+Create utf8mb4 DB, import dump, truncate
+.BR cache_* ,
+copy files and custom code, patch theme
+.B .info
+files, download ports, run
+.B bee \-y update-db ,
+cache-rebuild.
+.TP
+.B attach \-\-platform NAME \-\-product NAME
+Apache alias and
+.B stardust site-check .
+.TP
+.B toolkit PLATFORM
+Download
+.BR coder_upgrade ,
+.BR default_views_config ,
+.BR entity_plus ,
+.BR entity_ui ,
+.B d7compatible
+(and
+.B rules_cmi
+only if Rules was scanned).
+.TP
+.B stubs
+Write empty D7 stub modules the scan said you need
+.RB ( entity_plus
+/
+.B entity_ui
+and
+.B ubercart
+only when
+.B uc_*
+is enabled).
+.TP
+.B theme-patch \-\-platform NAME \-\-product NAME
+Set
+.B backdrop = 1.x
+and
+.B base theme = d7compatible
+on copied D7 themes.
+.TP
+.B cex \-\-platform NAME \-\-product NAME
+.B bee config-export
+(active JSON to staging).
+.TP
+.B port \-\-from MODULE_DIR \-\-platform NAME
+Wrap
+.B coder_upgrade
+for one custom module.
+.TP
+.B tools
+Print the official Backdrop testers and what Stardust wraps.
+.TP
+.B all
+prep + assess + convert + attach.
+.SH OPTIONS
+.TP
+.B \-n
+Dry-run.
+.TP
+.B \-\-yes
+Answer safe prompts yes (write stubs, run auto apply steps).
+.TP
+.B \-\-from DIR
+Site directory or prep bundle.
+.TP
+.B \-\-out DIR
+Bundle / plan directory.
+.TP
+.B \-\-plan DIR
+Plan directory (or path to
+.BR plan.json ).
+.TP
+.B \-\-step ID
+Single apply step.
+.TP
+.B \-\-platform NAME
+.TQ
+.B \-\-product NAME
+.TQ
+.B \-\-host HOST
+.TP
+.B \-\-alias @site
+Drush alias on the BOA box.
+.TP
+.B \-\-sql FILE
+.TQ
+.B \-\-files DIR
+.TQ
+.B \-\-private DIR
+.TP
+.B \-\-force
+Assess does not fail on missing ports.
+.TP
+.B \-\-skip-dl
+Convert does not
+.B bee download
+ports.
+.TP
+.B \-\-keep-update-access
+Leave
+.B $update_free_access = TRUE
+after convert.
+.SH FILES
+.TP
+.B lib/d7.sh
+Module sourced by
+.B stardust
+and
+.BR d7-migrate .
+.TP
+.B lib/d7-catalog.txt
+COREIN / DROP / REPLACE / CONTRIB / STUB map.
+.TP
+.B docs/d7-migration.txt
+New-sysadmin handbook.
+.TP
+.B DIR/plan.json
+Machine plan written by
+.BR test .
+.TP
+.B DIR/TUTORIAL.txt
+Leftover human steps after
+.BR apply .
+.SH SEE ALSO
+.BR stardust (1),
+.BR crdir (1),
+docs/d7-migration.txt,
+https://docs.backdropcms.org/documentation/upgrading-from-drupal-7-overview
+.SH NOTES
+Do not prefix
+.B stardust
+with
+.BR sudo .
+Operator user only.
+.PP
+JSON config for settings, Views stored in
+.BR {views_view} ,
+and most variables is written by each module's
+.B hook_update_N
+during
+.BR update-db .
+.B bee config-export
+is how that JSON moves between devel / test / live.
+Code-only default Views still need
+.BR default_views_config .

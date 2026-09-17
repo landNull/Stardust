@@ -83,6 +83,215 @@ branch_for_role() {
   esac
 }
 
+is_tty() {
+  [ -t 0 ] && [ -t 2 ]
+}
+
+# Placeholders from docs are not a real template.
+git_template_ok() {
+  t=${1:-}
+  [ -n "$t" ] || return 1
+  case $t in
+    *YOURORG*|*git.example*|*example.com*) return 1 ;;
+  esac
+  return 0
+}
+
+show_help_pager() {
+  # apt-listchanges style: pager, then q returns to the prompt.
+  text=$1
+  [ -n "$text" ] || return 0
+  pager=${PAGER:-}
+  if [ -z "$pager" ] && command -v sensible-pager >/dev/null 2>&1; then
+    pager=sensible-pager
+  fi
+  if [ -z "$pager" ] && command -v less >/dev/null 2>&1; then
+    pager="less -F -X -E"
+  fi
+  if [ -z "$pager" ] && command -v more >/dev/null 2>&1; then
+    pager=more
+  fi
+  if [ -n "$pager" ]; then
+    printf '%s\n' "$text" | $pager
+  else
+    printf '%s\n' "$text" >&2
+    printf 'Press Enter to continue... ' >&2
+    IFS= read -r _ || true
+  fi
+}
+
+prompt_line() {
+  # prompt_line "Question" "default" [help_text]
+  # Type ? or help to open the pager. Empty keeps the default.
+  q=$1
+  def=${2:-}
+  help=${3:-}
+  while :; do
+    if [ -n "$help" ]; then
+      printf '%s  (? help)\n' "$q" >&2
+    fi
+    if [ -n "$def" ]; then
+      printf '> [%s]: ' "$def" >&2
+    else
+      printf '> ' >&2
+    fi
+    IFS= read -r ans || ans=
+    case $ans in
+      \?|help|HELP)
+        if [ -n "$help" ]; then
+          show_help_pager "$help"
+        else
+          echo "(no extra help for this question)" >&2
+        fi
+        continue
+        ;;
+    esac
+    if [ -z "$ans" ]; then
+      ans=$def
+    fi
+    printf '%s\n' "$ans"
+    return 0
+  done
+}
+
+save_git_template() {
+  tpl=$1
+  dest=${STARDUST_USER_CONF:-$HOME/.stardust.conf}
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ append STARDUST_GIT_TEMPLATE=$tpl -> $dest" >&2
+    return 0
+  fi
+  if [ -f "$dest" ] && grep -q '^STARDUST_GIT_TEMPLATE=' "$dest" 2>/dev/null; then
+    tmp=$dest.tmp
+    sed "s|^STARDUST_GIT_TEMPLATE=.*|STARDUST_GIT_TEMPLATE=$tpl|" "$dest" > "$tmp" && mv "$tmp" "$dest"
+  else
+    printf '\nSTARDUST_GIT_TEMPLATE=%s\n' "$tpl" >> "$dest"
+  fi
+  STARDUST_GIT_TEMPLATE=$tpl
+  echo "saved STARDUST_GIT_TEMPLATE in $dest" >&2
+}
+
+# Scan this login for a likely git SSH host / owner. Best-effort, never fatal.
+detect_git_host() {
+  if [ -n "${GIT_HOST:-}" ]; then
+    printf '%s\n' "$GIT_HOST"
+    return 0
+  fi
+  # ~/.ssh/config Host lines that look like a git forge
+  if [ -f "$HOME/.ssh/config" ]; then
+    hit=$(awk 'tolower($1)=="host" {
+      for (i=2;i<=NF;i++) {
+        h=$i
+        if (h ~ /[*?]/) next
+        if (h ~ /gitea|github|gitlab|gitbucket|codeberg|sr.ht|git\./) { print h; exit }
+      }
+    }' "$HOME/.ssh/config" 2>/dev/null || true)
+    if [ -n "$hit" ]; then
+      printf '%s\n' "$hit"
+      return 0
+    fi
+    hit=$(awk 'tolower($1)=="host" && $2 !~ /[*?]/ { print $2; exit }' "$HOME/.ssh/config" 2>/dev/null || true)
+    if [ -n "$hit" ]; then
+      printf '%s\n' "$hit"
+      return 0
+    fi
+  fi
+  # remotes already on this box
+  for root in "$PLATFORMS" "$HOME" /srv/platforms; do
+    [ -d "$root" ] || continue
+    hit=$(find "$root" -maxdepth 4 -type d -name .git 2>/dev/null | head -n 20 | while read -r g; do
+      git --git-dir="$g" remote get-url origin 2>/dev/null || true
+    done | sed -n 's/^git@\([^:]*\):.*/\1/p; s|^ssh://git@\([^/]*\)/.*|\1|p' | head -n 1)
+    if [ -n "$hit" ]; then
+      printf '%s\n' "$hit"
+      return 0
+    fi
+  done
+  # insteadOf / url.*.insteadof
+  if have git; then
+    hit=$(git config --global --get-regexp '^url\..*\.insteadof' 2>/dev/null | sed -n 's/^url\.git@\([^:/]*\).*/\1/p' | head -n 1)
+    if [ -n "$hit" ]; then
+      printf '%s\n' "$hit"
+      return 0
+    fi
+  fi
+}
+
+detect_git_owner() {
+  if [ -n "${GIT_OWNER:-}" ]; then
+    printf '%s\n' "$GIT_OWNER"
+    return 0
+  fi
+  for root in "$PLATFORMS" "$HOME" /srv/platforms; do
+    [ -d "$root" ] || continue
+    hit=$(find "$root" -maxdepth 4 -type d -name .git 2>/dev/null | head -n 20 | while read -r g; do
+      git --git-dir="$g" remote get-url origin 2>/dev/null || true
+    done | sed -n 's/^git@[^:]*:\([^/]*\)\/.*/\1/p; s|^https://[^/]*/\([^/]*\)/.*|\1|p' | head -n 1)
+    if [ -n "$hit" ]; then
+      printf '%s\n' "$hit"
+      return 0
+    fi
+  done
+  if have git; then
+    hit=$(git config --global github.user 2>/dev/null || true)
+    [ -n "$hit" ] && { printf '%s\n' "$hit"; return 0; }
+  fi
+}
+
+# Interactive only when stdin is a terminal and --git / usable template missing.
+ask_git_remote() {
+  name=$1
+  if ! is_tty; then
+    return 1
+  fi
+  scan_host=$(detect_git_host || true)
+  scan_owner=$(detect_git_owner || true)
+  echo "No git URL yet. platform-add clones a repo (site-add does not)." >&2
+  echo "Leave the host empty to skip git and use bee dl-core." >&2
+  if [ -n "$scan_host" ] || [ -n "$scan_owner" ]; then
+    echo "scanned this login: host=${scan_host:-?} owner=${scan_owner:-?}" >&2
+  fi
+  help_host="Git SSH host
+
+This is the name your machine uses in git@HOST:org/repo.git
+It is often a Host line in ~/.ssh/config (example: gitea-starhq),
+not necessarily a public DNS name.
+
+Stardust scanned this login for SSH config and existing remotes.
+Accept the default with Enter. Clear the line to skip git and let
+Bee download a fresh Backdrop tree instead.
+
+q in the pager returns here. Type your answer after that."
+  help_owner="Git owner / org
+
+This is the first path component after the colon:
+  git@HOST:OWNER/%s.git
+
+On Gitea it is the organization or your username.
+On GitHub it is landNull or an org name.
+%s becomes the platform name (ecom, torg, …).
+
+q in the pager returns here."
+  host=$(prompt_line "Git SSH host — machine name in git@HOST:…" "${scan_host}" "$help_host")
+  if [ -z "$host" ]; then
+    return 1
+  fi
+  owner=$(prompt_line "Git owner/org — first path after the colon" "${scan_owner}" "$help_owner")
+  if [ -z "$owner" ]; then
+    echo "$PROG: owner/org required for a template" >&2
+    return 1
+  fi
+  tpl="git@${host}:${owner}/%s.git"
+  url=$(printf '%s' "$tpl" | sed "s|%s|$name|g")
+  echo "template: $tpl" >&2
+  echo "this platform: $url" >&2
+  save=$(prompt_line "Save template to ~/.stardust.conf for next time?" "Y")
+  case $save in
+    Y|y|yes|YES) save_git_template "$tpl" ;;
+  esac
+  printf '%s\n' "$url"
+}
+
 DB_HOST=${DB_HOST:-127.0.0.1}
 DB_PREFIX=${DB_PREFIX:-bd_}
 KEEP_BACKUPS=${KEEP_BACKUPS:-7}

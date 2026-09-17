@@ -10,10 +10,11 @@ Do not commit `/srv/platforms` or `/srv/stardust/state/secrets`.
 
 ```
 stardust-install.sh   host bootstrap (run from this directory)
-bin/                  stardust, stardust-priv, stardust-menu, crdir, newfeature
-lib/                  POSIX modules sourced by bin/stardust
+bin/                  stardust, stardust-priv, stardust-menu, crdir, newfeature, d7-migrate
+lib/                  POSIX modules sourced by bin/stardust (d7.sh + d7-catalog.txt)
 man/                  stardust.1 crdir.1
 docs/tutorial.txt     install + day-to-day
+docs/d7-migration.txt Drupal 7 / BOA -> Backdrop (new sysadmin)
 conf/                 reference settings JSON
 tui/                  Bubble Tea source (optional; build with go)
 ```

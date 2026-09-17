@@ -157,6 +157,9 @@ site-enable
 platform-upgrade
 promote-test
 promote-live
+d7-tools
+d7-test
+d7-assess
 site-delete
 backup-all
 quit
@@ -171,6 +174,21 @@ while :; do
     inventory) $SD inventory; pause ;;
     log) $SD log 20; pause ;;
     last) $SD last; pause ;;
+    d7-tools) $SD d7 tools; pause ;;
+    d7-test)
+      from=$(ask "D7 site / bundle / platform root" "") || continue
+      [ -n "$from" ] || continue
+      echo "+ $SD d7 test $from"
+      $SD d7 test "$from"
+      pause
+      ;;
+    d7-assess)
+      from=$(ask "bundle or D7 site dir" "") || continue
+      [ -n "$from" ] || continue
+      echo "+ $SD d7 assess --from $from"
+      $SD d7 assess --from "$from"
+      pause
+      ;;
     site-check) run_site site-check ;;
     site-backup) run_site site-backup ;;
     site-restore)

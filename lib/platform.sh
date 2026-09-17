@@ -28,12 +28,13 @@ cmd_platform_add() {
     case $1 in
       --git) giturl=$2; shift 2 ;;
       --branch) branch=$2; shift 2 ;;
+      --no-prompt) STARDUST_NOPROMPT=1; shift ;;
       *) echo "$PROG: unknown flag $1" >&2; exit 2 ;;
     esac
   done
   name=$(slug "$name")
   if [ -z "$name" ]; then
-    echo "usage: $PROG platform-add NAME [--git URL] [--branch BRANCH]" >&2
+    echo "usage: $PROG platform-add NAME [--git URL] [--branch BRANCH] [--no-prompt]" >&2
     echo "  default: clone STARDUST_GIT_TEMPLATE (use %s for NAME) onto branch $(branch_for_role)" >&2
     echo "  --branch overrides BRANCH_DEVEL / BRANCH_TEST / BRANCH_LIVE / STARDUST_BRANCH" >&2
     exit 2
@@ -41,8 +42,18 @@ cmd_platform_add() {
   if [ -z "$branch" ]; then
     branch=$(branch_for_role)
   fi
-  if [ -z "$giturl" ] && [ -n "${STARDUST_GIT_TEMPLATE:-}" ]; then
+  if [ -z "$giturl" ] && git_template_ok "${STARDUST_GIT_TEMPLATE:-}"; then
     giturl=$(printf '%s' "$STARDUST_GIT_TEMPLATE" | sed "s|%s|$name|g")
+  fi
+  if [ -z "$giturl" ] && [ "${STARDUST_NOPROMPT:-0}" != 1 ]; then
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ prompt Git SSH host / owner if this is a terminal (skip with --no-prompt)"
+    else
+      prompted=$(ask_git_remote "$name" || true)
+      if [ -n "$prompted" ]; then
+        giturl=$prompted
+      fi
+    fi
   fi
 
   dest=$PLATFORMS/$name

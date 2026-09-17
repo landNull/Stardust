@@ -55,6 +55,8 @@ LIBDIR=$(find_lib) || {
 . "$LIBDIR/clone.sh"
 # shellcheck disable=SC1091
 . "$LIBDIR/promote.sh"
+# shellcheck disable=SC1091
+. "$LIBDIR/d7.sh"
 
 usage() {
   cat <<EOF
@@ -78,6 +80,7 @@ $PROG 0.4.0 — manage Backdrop platforms and sites from the shell
   $PROG [-n] site-delete PLATFORM PRODUCT [--force]
   $PROG [-n] backup-all
   $PROG [-n] cron-all
+  $PROG [-n] d7 VERB …   # Drupal 7 / BOA -> Backdrop (see $PROG d7 help)
   stardust-menu          # gum / whiptail / dialog
   stardust-tui           # Bubble Tea full-screen; same verbs
 
@@ -127,6 +130,10 @@ EXAMPLES
   $PROG inventory
   $PROG site-disable mysite www && $PROG site-enable mysite www
   $PROG -n site-delete mysite www-copy
+  $PROG d7 test /data/disk/o1/…/sites/example.com
+  $PROG d7 /data/disk/o1/…/sites/example.com
+  $PROG d7 tools
+  $PROG -n d7 all --from /path/to/d7-example --platform ecom --product example --host example.devel
   stardust-menu
   stardust-tui
   id                    # confirm www-admin stardust
@@ -185,6 +192,17 @@ dispatch() {
     inventory) cmd_inventory ;;
     backup-all) cmd_backup_all ;;
     cron-all) cmd_cron_all ;;
+    d7|d7-migrate) cmd_d7 "$@" ;;
+    d7-prep) cmd_d7 prep "$@" ;;
+    d7-assess) cmd_d7 assess "$@" ;;
+    d7-convert) cmd_d7 convert "$@" ;;
+    d7-attach) cmd_d7 attach "$@" ;;
+    d7-toolkit) cmd_d7 toolkit "$@" ;;
+    d7-stubs) cmd_d7 stubs "$@" ;;
+    d7-port) cmd_d7 port "$@" ;;
+    d7-tools) cmd_d7 tools "$@" ;;
+    d7-test) cmd_d7 test "$@" ;;
+    d7-apply) cmd_d7 apply "$@" ;;
     *)
       echo "$PROG: unknown command '$cmd'" >&2
       usage >&2
@@ -203,7 +221,7 @@ case $cmd in
       exit "$rc"
     fi
     ;;
-  site-add|site-backup|site-clone|site-check|site-disable|site-enable|cron-all|platform-add)
+  site-add|site-backup|site-clone|site-check|site-disable|site-enable|cron-all|platform-add|d7|d7-migrate|d7-prep|d7-assess|d7-test|d7-apply|d7-convert|d7-attach|d7-toolkit|d7-stubs|d7-port)
     if dispatch "$@"; then
       task_log "$cmd $*" 0
     else

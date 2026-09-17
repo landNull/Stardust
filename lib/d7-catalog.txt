@@ -1,0 +1,201 @@
+# Stardust D7 catalog — machine_name <tab> class <tab> backdrop <tab> note
+# class:
+#   COREIN     D7 contrib absorbed into Backdrop core (leave enabled; do not bee dl)
+#   CORE7      D7 core that still exists in Backdrop core
+#   DROP       uninstall on D7 before convert (removed, hostile, or replaced by name)
+#   CONTRIB    same machine name exists on backdrop-contrib
+#   REPLACE    different Backdrop project; column 3 is the Backdrop name
+#   STUB       enable empty D7 stub before dump so Backdrop update.php keeps dependents
+#   TOOL_D7    install on the Drupal 7 site to test readiness
+#   TOOL_BD    install on a Backdrop devel platform to port / convert
+#   THEME      theme-side helper
+#
+# Official docs:
+#   https://docs.backdropcms.org/documentation/upgrading-from-drupal-7-overview
+#   https://docs.backdropcms.org/documentation/step-1-planning
+#   https://docs.backdropcms.org/documentation/step-2-prepare-the-drupal-site
+#   https://docs.backdropcms.org/documentation/step-3-upgrade-the-drupal-site
+#   https://docs.backdropcms.org/documentation/features-added-to-core
+#   https://docs.backdropcms.org/documentation/upgrading-drupal-7-modules-that-have-been-removed-from-core
+#   https://docs.backdropcms.org/documentation/upgrading-drupal-7-modules-with-backdrop-replacements
+
+# --- tools (D7 site) ---
+backdrop_upgrade_status	TOOL_D7	backdrop_upgrade_status	D7 module: Reports > Updates > Backdrop upgrade status. https://www.drupal.org/project/backdrop_upgrade_status https://github.com/backdrop-contrib/backdrop_upgrade_status
+
+# --- tools (Backdrop platform) ---
+coder_upgrade	TOOL_BD	coder_upgrade	Ports D7 module PHP via Grammar Parser. admin/config/development/coder-upgrade. https://backdropcms.org/project/coder_upgrade
+default_views_config	TOOL_BD	default_views_config	hook_views_default_views() PHP -> views.view.*.json. admin/structure/views/default-views-convert
+entity_plus	TOOL_BD	entity_plus	Remainder of D7 Entity API. Required by Rules, Ubercart, Search API.
+entity_ui	TOOL_BD	entity_ui	Entity UI companion for Entity Plus / Rules / Ubercart
+d7compatible	THEME	d7compatible	Base theme so a D7 theme can run with fewer CSS selector changes
+rules_cmi	TOOL_BD	rules_cmi	After updb: optional transfer of Rules DB rows to CMI JSON. Not required for the upgrade itself.
+
+# --- stubs to enable on D7 before the backdrop-ready dump ---
+entity_plus	STUB	entity_plus	Empty D7 stub so update.php does not disable Rules/Ubercart dependents
+entity_ui	STUB	entity_ui	Empty D7 stub
+ubercart	STUB	ubercart	Empty D7 wrapper stub (Backdrop Ubercart is a wrapper module)
+
+# --- D7 core removed from Backdrop ---
+aggregator	CONTRIB	aggregator	Leave enabled; bee dl aggregator before updb
+blog	DROP	-	Uninstall after converting or deleting blog nodes
+dashboard	DROP	dashboard	Uninstall D7 dashboard; enable Backdrop dashboard after updb
+forum	CONTRIB	forum	Or convert forum nodes and uninstall
+help	DROP	-	Uninstall on D7
+openid	DROP	-	Uninstall unless you will port it
+overlay	DROP	-	Uninstall on D7
+php	DROP	-	Strip PHP Filter content first (security), then uninstall
+poll	DROP	-	Convert or delete poll nodes, then uninstall
+profile	CONTRIB	profile	Leave enabled; bee dl profile
+rdf	DROP	-	Uninstall on D7
+shortcut	DROP	-	Uninstall on D7
+statistics	CONTRIB	statistics	Leave enabled; bee dl statistics
+toolbar	DROP	admin_bar	Uninstall; Admin Bar is Backdrop core
+tracker	DROP	-	Uninstall on D7
+trigger	CONTRIB	trigger_actions	Leave enabled; bee dl trigger_actions
+xmlrpc	CONTRIB	xmlrpc	Moved to contrib
+
+# --- D7 contrib now in Backdrop core (do not download, do not uninstall) ---
+admin_menu	COREIN	admin_bar	Admin Bar
+admin_views	COREIN	-	Core listings
+auto_menu	COREIN	node	
+bean	COREIN	node	Nodes as blocks
+better_formats	COREIN	field	Partial
+block_class	COREIN	system	
+blockify	COREIN	layout	
+ctools	COREIN	system	chaos_tools
+chaos_tools	COREIN	system	
+ckeditor	COREIN	ckeditor	
+comment_closer	COREIN	comment	
+contact_block	COREIN	contact	
+context	COREIN	layout	Replaced by Layouts
+date	COREIN	date	Repeating dates stay contrib (date_repeat)
+date_popup_authored	COREIN	node	
+default_config	COREIN	config	
+diff	COREIN	config	
+display_suite	REPLACE	layout	No stable DS; layouts + view modes
+drafty	COREIN	node	
+elements	COREIN	system	
+email	COREIN	email	
+email_registration	COREIN	user	
+entity	COREIN	entity	Remainder -> entity_plus
+entity_api	COREIN	entity	
+entity_cache	COREIN	entity	
+entityreference	COREIN	entityreference	
+entity_reference	COREIN	entityreference	
+entity_view_mode	COREIN	field_ui	
+features	COREIN	config	Partial; remaining features -> config
+field_group	COREIN	field_group	
+field_formatter_settings	COREIN	field	
+file_entity	COREIN	file	
+flood_control	COREIN	user	
+html5_tools	COREIN	system	
+insert	COREIN	ckeditor	
+jquery_update	COREIN	system	
+libraries	COREIN	-	Bundled with modules
+libraries_api	COREIN	-	
+link	COREIN	link	
+linkit	COREIN	filter	
+media	COREIN	file	Partial
+media_ckeditor	COREIN	ckeditor	
+menu_block	COREIN	system	Partial
+module_filter	COREIN	system	
+multiblock	COREIN	layout	
+navbar	COREIN	admin_bar	
+nice_menus	COREIN	system	
+node_block	COREIN	node	
+options_element	COREIN	field	
+page_preview	COREIN	node	
+panels	COREIN	layout	Partial; recreate non-block layouts
+panels_everywhere	COREIN	layout	
+pathauto	COREIN	path	
+placeholder	COREIN	system	
+project_browser	COREIN	installer	
+rabbit_hole	COREIN	node	
+radix_layouts	COREIN	layout	
+redirect	COREIN	redirect	
+role_assign	COREIN	user	
+scheduler	COREIN	node	
+strongarm	COREIN	config	
+superfish	COREIN	system	
+svg_image	COREIN	file	
+system_info	COREIN	dashboard	
+token	COREIN	system	
+transliteration	COREIN	system	
+uuid	COREIN	system	
+variable	COREIN	config	
+views	COREIN	views	
+views_ui	COREIN	views	
+views_bulk_operations	COREIN	views	
+vbo	COREIN	views	
+wysiwyg	COREIN	ckeditor	Replaced by CKEditor
+
+# --- replacements (different project name or recommended alt) ---
+colorbox	REPLACE	featherlight	Colorbox exists; Featherlight is the recommended alt
+lightbox2	REPLACE	featherlight	
+field_collection	REPLACE	paragraphs	Or multifield
+references	REPLACE	entityreference	Keep data; References upgrade path uses ER
+node_reference	REPLACE	entityreference	
+user_reference	REPLACE	entityreference	
+workbench_moderation	REPLACE	content_moderation	
+commerce	REPLACE	ubercart	Commerce port exists but Ubercart is the maintained shop
+imce	CONTRIB	imce	Or drop; CKEditor uploads are core
+imce_wysiwyg	COREIN	ckeditor	
+
+# --- common contrib ports (same name) ---
+webform	CONTRIB	webform	
+rules	CONTRIB	rules	Needs entity_plus + entity_ui in the Backdrop tree BEFORE updb; D7 stubs first
+ubercart	CONTRIB	ubercart	Same stub rule as rules
+uc_cart	CONTRIB	ubercart	Submodule of ubercart
+uc_order	CONTRIB	ubercart	
+uc_product	CONTRIB	ubercart	
+metatag	CONTRIB	metatag	
+xmlsitemap	CONTRIB	xmlsitemap	
+google_analytics	CONTRIB	google_analytics	
+captcha	CONTRIB	captcha	
+recaptcha	CONTRIB	recaptcha	
+honeypot	CONTRIB	honeypot	
+backup_migrate	CONTRIB	backup_migrate	
+smtp	CONTRIB	smtp	
+mailsystem	CONTRIB	mailsystem	
+job_scheduler	CONTRIB	job_scheduler	
+feeds	CONTRIB	feeds	
+feeds_tamper	CONTRIB	feeds_tamper	
+date_ical	CONTRIB	date_ical	
+calendar	CONTRIB	calendar	
+paragraphs	CONTRIB	paragraphs	
+search_api	CONTRIB	search_api	Needs entity_plus
+i18n	CONTRIB	i18n	
+l10n_update	CONTRIB	l10n_update	
+locale	CORE7	locale	
+field_sql_storage	CORE7	field	
+taxonomy	CORE7	taxonomy	
+menu	CORE7	menu	
+path	CORE7	path	
+dblog	CORE7	dblog	
+filter	CORE7	filter	
+field	CORE7	field	
+field_ui	CORE7	field_ui	
+node	CORE7	node	
+user	CORE7	user	
+system	CORE7	system	
+block	CORE7	layout	Blocks become Layouts
+comment	CORE7	comment	
+contact	CORE7	contact	
+search	CORE7	search	
+file	CORE7	file	
+image	CORE7	image	
+text	CORE7	text	
+number	CORE7	number	
+list	CORE7	list	
+options	CORE7	options	
+book	CORE7	book	
+color	CORE7	color	
+contextual	CORE7	contextual	
+syslog	CORE7	syslog	
+update	CORE7	update	Keep for upgrade_status on D7; Backdrop has Installer
+og	CONTRIB	og	Organic Groups — confirm the Backdrop port before convert
+flag	CONTRIB	flag	
+memcache	DROP	-	Disable this cache backend on D7 before the dump
+redis	DROP	-	Disable this cache backend on D7 before the dump
+varnish	DROP	-	Disable before dump; Varnish is infra
+entitycache	DROP	-	Uninstall; Backdrop core cache covers this

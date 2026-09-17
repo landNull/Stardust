@@ -1,0 +1,348 @@
+# Stardust — Drupal 7 / BOA -> Backdrop on knarr
+# Step-by-step for a new sysadmin
+
+system:
+  os: Devuan (sysvinit) hostname: starhq.knarr
+  cpu: 8-core AMD FX-8320E ram: 32GB storage: 2x1TB SSD RAID 1
+  stack: Apache + PHP + MariaDB + Bee + crdir
+  control: /srv/stardust
+  sites:   /srv/platforms
+  no PHP panel
+
+Read this once. Then run the commands in order. Do not skip
+"dry-run first" lines. Do not type sudo in front of stardust.
+
+The conversion is NOT a Drupal 8/10 migrate pipeline.
+Backdrop is a Drupal 7 fork. You import the D7 database into
+an empty Backdrop database and run:
+
+  bee -y --root=/srv/platforms/PLATFORM/web --site=PRODUCT update-db
+
+That update-db call (same as core/update.php) is the conversion.
+Never run "bee install" on an imported D7 dump. It would wipe it.
+
+--------------------------------------------------------------------
+0. Words
+--------------------------------------------------------------------
+
+  BOA box     the live Drupal 7 VPS (Aegir / BOA layout)
+  knarr       this host — Stardust devel (or the VPS after promote)
+  platform    one Backdrop codebase   /srv/platforms/ecom
+  product     one website in it       ecom/example
+  bundle      output of "d7 prep"     dump.sql.gz + files + inventory
+  plan        output of "d7 test"     plan.json + playbook.txt + steps
+  auto step   stardust d7 apply can run it
+  manual step you do it; apply only records done/blocked
+
+  Operator login (not root). After installer group changes:
+    exec su - $USER
+  (exec bash does NOT refresh groups.)
+
+--------------------------------------------------------------------
+1. What you need on each machine
+--------------------------------------------------------------------
+
+  BOA box
+    - the live D7 site directory (settings.php or Aegir drushrc.php)
+    - drush and/or mysql + mysqldump
+    - the portable wrapper only:
+        d7-migrate   (copy bin/d7-migrate + lib/d7.sh + lib/d7-catalog.txt)
+    - you do NOT install Stardust on the live BOA box
+
+  knarr
+    - Stardust already installed (see docs/tutorial.txt sections 1-8)
+    - stardust doctor says READY
+    - a platform exists, or convert will platform-add one
+        stardust list
+        stardust -n platform-add ecom --git URL
+        stardust    platform-add ecom --git URL
+
+--------------------------------------------------------------------
+2. Scan first (always)
+--------------------------------------------------------------------
+
+  On knarr, if you already copied the site tree:
+
+    stardust d7 test /path/to/sites/example.com --out /tmp/d7-example
+
+  On the BOA box:
+
+    d7-migrate test \
+      --from /data/disk/o1/aegir/distro/PLATFORM/sites/example.com \
+      --alias @example.com \
+      --out /data/disk/o1/static/d7-example
+
+  Shorthand (directory as the first argument):
+
+    stardust d7 /path/to/sites/example.com
+
+  That writes:
+    playbook.txt   human list
+    plan.json      machine list
+    modules.tsv    every module/theme and what to do with it
+    steps.tsv      every conversion step
+    status.tsv     todo / done / skip / blocked
+    settings.txt   site_name, theme, db name (no password)
+    inventory.txt  nodes, users, files, Views, PHP filters, charset
+    TUTORIAL.txt   this guide, filled in for THIS site once apply runs
+
+  Read playbook.txt before you touch the live site.
+
+  Ubercart / Rules / Search API steps appear ONLY if those
+  modules are enabled. A brochure site will not get shop stubs.
+
+--------------------------------------------------------------------
+3. Work on the live Drupal 7 site (BOA)
+--------------------------------------------------------------------
+
+  Do this on the BOA box, as the Aegir user (usually o1),
+  during a maintenance window.
+
+  3.1  Backup the Aegir way (or drush ard / sql-dump + files).
+       Keep that backup until the Backdrop site has been live
+       for a week.
+
+  3.2  Update D7 core and contrib as far as the site will go.
+
+  3.3  Install backdrop_upgrade_status
+         drush dl backdrop_upgrade_status
+         drush en update backdrop_upgrade_status -y
+       Visit admin/reports/updates/backdrop-upgrade
+       That page is the official per-project score.
+
+  3.4  Uninstall modules the playbook listed under UNINST / DROP.
+       Typical: overlay, php, blog, poll, dashboard, rdf,
+       memcache, redis, entitycache.
+       PHP Filter: strip PHP bodies from nodes first.
+       Do NOT uninstall Views, Date, Token, CTools, Pathauto,
+       Features, Strongarm — Backdrop core reads that data
+       during update-db.
+
+  3.5  If the playbook asked for stubs:
+
+         d7-migrate stubs --from /tmp/d7-example --out /tmp/d7-example/stubs
+         # copy stubs/* into sites/all/modules
+         drush en entity_plus entity_ui -y
+         # plus: drush en ubercart -y   ONLY if the scan found uc_*
+
+  3.6  Maintenance mode. Clear caches.
+         drush vset maintenance_mode 1
+         drush cc all
+
+  3.7  Take the backdrop-ready dump (this is the convert input):
+
+         d7-migrate prep \
+           --from /data/disk/o1/…/sites/example.com \
+           --alias @example.com \
+           --out /data/disk/o1/static/d7-example
+
+       prep copies:
+         dump.sql.gz
+         files/ and private/
+         sites/SITE/modules and themes
+         sites/all/modules/{custom,features}
+         sites/all/themes and libraries
+
+  3.8  Copy the bundle to knarr over WireGuard.
+       Leave the live D7 site in maintenance until you have
+       checked the Backdrop copy.
+
+--------------------------------------------------------------------
+4. Automated conversion on knarr
+--------------------------------------------------------------------
+
+  As the operator (not root):
+
+    stardust -n d7 apply --plan /tmp/d7-example \
+      --platform ecom --product example --host example.devel
+
+  Read the printed commands. Then:
+
+    stardust d7 apply --plan /tmp/d7-example \
+      --platform ecom --product example --host example.devel --yes
+
+  One step at a time if something fails:
+
+    stardust d7 apply --plan /tmp/d7-example --step convert
+    stardust d7 apply --plan /tmp/d7-example --step config-export
+
+  What apply runs when auto=true:
+
+    toolkit        bee dl coder_upgrade default_views_config
+                   entity_plus entity_ui d7compatible
+                   (+ rules_cmi only if Rules was enabled)
+    convert        create utf8mb4 DB, import dump, TRUNCATE cache_*,
+                   copy files + custom code, patch theme .info,
+                   bee dl missing ports, bee -y update-db,
+                   bee cache-rebuild
+    theme-patch    backdrop = 1.x, base theme = d7compatible
+    config-export  active JSON -> staging (this is CMI)
+    attach         Apache alias + stardust site-check
+
+  update-db is Backdrop writing the JSON config
+  (system.core.json, views.view.*.json, field.*.json, …).
+  You do not convert variables / Views-in-DB by hand.
+
+  If update-db fails it leaves $update_free_access = TRUE.
+  Open http://example.devel/core/update.php and read the error.
+  Apache error log: stardust site-check ecom example
+
+--------------------------------------------------------------------
+5. After the automated steps — you are here
+--------------------------------------------------------------------
+
+  apply writes TUTORIAL.txt next to plan.json. That file lists
+  only what is still todo/blocked for THIS site.
+
+  Do these in order.
+
+  5.1  Log in
+         http://example.devel/user
+       If user-1 password is unknown:
+         bee --root=/srv/platforms/ecom/web --site=example \
+           user-password 1 --password NEW
+
+  5.2  Layouts  (admin/structure/layouts)
+       D7 blocks, Panels, and Context do NOT recreate themselves
+       as matching Backdrop layouts. You get Default + Admin.
+       Move blocks into regions. Recreate any Panel pages.
+
+  5.3  Theme
+       Look at the front page. d7compatible only buys CSS
+       selectors. Expect to edit the theme.
+         /srv/platforms/ecom/web/sites/example/themes/
+
+  5.4  Code-only Views
+       Views that lived in hook_views_default_views() were NOT
+       in {views_view}, so update-db did not write JSON for them.
+         bee --root=… --site=example en default_views_config
+         http://example.devel/admin/structure/views/default-views-convert
+       Then:
+         bee --root=… --site=example config-export
+
+  5.5  Rules (only if the scan said Rules: YES)
+         bee --root=… --site=example en rules_cmi
+         admin/config/workflow/Rules_cmi
+       Optional. Rules also still work from DB tables.
+
+  5.6  Search
+         bee --root=… --site=example cron
+       Search API: re-add the server endpoint (Solr/DB) and
+       re-index. The old D7 server URL is usually wrong.
+
+  5.7  Custom / uncatalogued modules
+       Listed in playbook as action=review.
+         stardust d7 port --from MODULE_DIR --platform ecom
+       That wraps coder_upgrade. A developer still has to
+       read the output. Enable the ported module, then
+       bee -y update-db again if it shipped hook_update_N.
+
+  5.8  Ubercart (only if the scan said Ubercart: YES)
+       Follow:
+         https://github.com/backdrop-contrib/ubercart/wiki/Upgrading-Ubercart-from-Drupal-7
+       Re-enter payment gateway keys. Test a cart on devel.
+
+  5.9  Config into git
+       Staging now has the JSON update-db wrote.
+         cd /srv/platforms/ecom
+         git add web/sites/example config/example
+         git status
+         git commit -m "example: D7 convert + CMI"
+         git push origin devel
+
+  5.10 Site check and backup
+         stardust site-check ecom example --host example.devel
+         stardust site-backup ecom example
+
+--------------------------------------------------------------------
+6. Promote off devel
+--------------------------------------------------------------------
+
+  Never promote from a dirty tree. Never promote on the devel
+  host to test/live — push, then promote on the VPS.
+
+    stardust site-backup ecom example
+    # on the test VPS:
+    stardust promote ecom --to test
+    stardust site-check ecom example --host example.test
+
+    # on the live VPS, after test is good:
+    stardust promote ecom --to live
+    stardust site-check ecom example --host example.com
+
+  Point DNS when live site-check is OK.
+  Take the D7 site out of maintenance, or park it, only then.
+
+--------------------------------------------------------------------
+7. When something breaks
+--------------------------------------------------------------------
+
+  update-db failed
+    $update_free_access is still TRUE
+    http://HOST/core/update.php
+    stardust site-check PLATFORM PRODUCT
+    Apache error log is in that report
+
+  WSOD / white screen
+    bee --root=WEB --site=PRODUCT status
+    bee --root=WEB --site=PRODUCT cache-rebuild
+    php-fpm / Apache error log
+
+  "unknown module X"
+    it was enabled in the dump but not on disk
+    bee --root=WEB download X
+    or uninstall it on a restored D7 dump and re-prep
+
+  Missing files
+    public:  /srv/platforms/PLATFORM/files/PRODUCT
+    private: /srv/platforms/PLATFORM/files_private/PRODUCT
+    copy again from the bundle files/ and private/
+
+  Wrong theme
+    stardust d7 theme-patch --platform PLATFORM --product PRODUCT
+    bee --root=WEB download d7compatible
+    set base theme = d7compatible in the .info
+
+  Accidental bee install
+    the D7 schema is gone
+    drop the DB, re-run convert from the bundle
+    (that is why we keep dump.sql.gz)
+
+  Need to start over
+    stardust site-delete PLATFORM PRODUCT --force
+    stardust d7 convert --from BUNDLE --platform P --product N --host H
+
+--------------------------------------------------------------------
+8. Commands cheat sheet
+--------------------------------------------------------------------
+
+  stardust d7 help
+  stardust d7 tools
+  stardust d7 test SITE [--out DIR] [--yes]
+  stardust d7 apply --plan DIR [--step ID] [--yes] [-n]
+  stardust d7 tutorial --plan DIR          # reprint TUTORIAL.txt
+  stardust d7 prep --from SITE --out DIR
+  stardust d7 convert --from BUNDLE --platform P --product N --host H
+  stardust d7 attach --platform P --product N --host H
+  stardust d7 toolkit PLATFORM
+  stardust d7 stubs --from BUNDLE --out DIR
+  stardust d7 theme-patch --platform P --product N
+  stardust d7 cex --platform P --product N
+  stardust d7 port --from MODULE_DIR --platform P
+
+  Portable on BOA (no Stardust installed):
+    d7-migrate test|prep|stubs|assess …   same flags
+
+--------------------------------------------------------------------
+9. See also
+--------------------------------------------------------------------
+
+  man stardust
+  stardust d7 help
+  docs/tutorial.txt                  host install + day-to-day
+  lib/d7-catalog.txt                 COREIN / DROP / REPLACE map
+  https://docs.backdropcms.org/documentation/upgrading-from-drupal-7-overview
+  https://www.drupal.org/project/backdrop_upgrade_status
+  https://docs.backdropcms.org/converting-modules-from-drupal
+  https://github.com/backdrop-contrib/ubercart/wiki/Upgrading-Ubercart-from-Drupal-7
+}

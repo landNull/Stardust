@@ -57,6 +57,11 @@ system:
   Bee        Backdrop CLI (not Drush)
              always: bee --root=/srv/platforms/PLATFORM/web --site=PRODUCT …
 
+  d7-migrate BOA / Drupal 7 -> Backdrop on knarr
+             prep on the VPS, assess + convert + attach on knarr
+             never runs bee install (that would wipe the D7 schema)
+             man-style help: d7-migrate help
+
   crdir      mkdir + chown + 0770
              site-add uses -s -o www-data -g www-admin on PHP trees
 
@@ -617,11 +622,39 @@ Exit status:
     Role devel refuses. Push from the devel host, promote on the VPS.
 
 --------------------------------------------------------------------
-13. See also
+13. Drupal 7 / BOA -> knarr
+--------------------------------------------------------------------
+
+  Full new-sysadmin walkthrough:
+
+    docs/d7-migration.txt
+    stardust d7 tutorial --plan DIR     # leftover steps for one site
+
+  Several live D7 sites on a BOA VPS become products on a Stardust
+  platform. Module: lib/d7.sh + lib/d7-catalog.txt.
+  On knarr: "stardust d7 …". On BOA: d7-migrate (same module).
+
+    stardust d7 test SITE --out /tmp/d7-example
+    # do the D7-side uninstalls/stubs in the playbook
+    d7-migrate prep --from SITE --out /tmp/d7-example
+    stardust -n d7 apply --plan /tmp/d7-example \
+      --platform ecom --product example --host example.devel
+    stardust    d7 apply --plan /tmp/d7-example \
+      --platform ecom --product example --host example.devel --yes
+
+  convert never runs bee install. update-db IS the conversion.
+  After apply, read /tmp/d7-example/TUTORIAL.txt (layouts, theme,
+  Views-in-code, Rules, Ubercart, CMI commit, promote).
+
+--------------------------------------------------------------------
+14. See also
 --------------------------------------------------------------------
 
   man stardust
   man crdir
+  stardust d7 help
+  d7-migrate help
+  docs/d7-migration.txt
   artifacts/stardust-settings.json
   artifacts/ecom-multisite-tutorial.txt
   artifacts/mysite-test-live-filesystem-tutorial.docx
