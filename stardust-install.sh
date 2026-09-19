@@ -650,22 +650,39 @@ install_bee() {
 
 install_gitea() {
   if ! gitea_installed; then
-    install_prompt "Install Gitea (Self-hosted Git Service)? [Y/n]" "Y"       "Gitea is a lightweight, self-hosted Git service for managing repositories. It is optional but recommended for Stardust workflows."
+    install_prompt "Install Gitea (Self-hosted Git Service)? [Y/n]" "Y" \
+      "Gitea is a lightweight, self-hosted Git service for managing repositories. It is optional but recommended for Stardust workflows."
     if [ "$ans" = "Y" ] || [ "$ans" = "y" ]; then
-      case $PKG in
-        apt)
-          pkg_install gitea
-          ;;
-        dnf|yum)
-          pkg_install gitea
-          ;;
-        *)
-          echo "Unsupported package manager. Install Gitea manually from https://gitea.io."
-          return 1
-          ;;
-      esac
+      
+      echo "🔍 Querying stable repository releases for target binary..."
+      
+      # 1. Query Gitea's JSON endpoint to parse out the latest version string programmatically
+      if have jq && have curl; then
+        LATEST_VERSION=$(curl -s https://dl.gitea.com/gitea/version.json | jq .latest.version -Mr)
+      else
+        # Safe fallback if jq isn't built into the active execution frame yet
+        LATEST_VERSION="1.27.3" 
+      fi
+
+      echo "🌐 Downloading Gitea v${LATEST_VERSION} Linux-amd64 binary..."
+      
+      # 2. Download the pre-compiled binary artifact safely into a temporary buffer folder
+      if [ "$DRYRUN" -eq 1 ]; then
+        echo "+ wget -O /tmp/gitea https://gitea.com{LATEST_VERSION}/gitea-${LATEST_VERSION}-linux-amd64"
+      else
+        run_root mkdir -p /tmp
+        run_root wget -q --show-progress -O /tmp/gitea "https://gitea.com{LATEST_VERSION}/gitea-${LATEST_VERSION}-linux-amd64"
+      fi
+
+      echo "📦 Setting up system binary allocations..."
+      
+      # 3. Use standard POSIX install flags to push it straight to your execution paths
+      run_root install -m 755 /tmp/gitea /usr/local/bin/gitea
+      run_root rm -f /tmp/gitea
+
+      # 4. Fire up the background listener framework daemon
       svc_start gitea
-      echo "Gitea installed. Configure it at http://$(hostname):3000."
+      echo "Gitea binary installed successfully. Configure it at http://$(hostname):3000."
     fi
   else
     echo "Gitea is already installed."
