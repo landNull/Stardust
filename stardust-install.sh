@@ -144,22 +144,17 @@ run_root() {
     return 0
   fi
 
-  # ─── REAL-TIME STATUS GUTTER ───
-  # Capture the command name and its first argument for a punchy layout
-  local cmd_summary="$1"
+  # FIX: Removed the 'local' keyword to keep it POSIX safe
+  cmd_summary="$1"
   if [ -n "${2:-}" ]; then
     cmd_summary="$cmd_summary $2"
   fi
   
-  # Print the "Processing" line using a carriage return (\r) so we can overwrite it later
-  # The trailing spaces clear out artifacts from previous longer lines
   printf "  \033[33m⏳ Processing:\033[0m [%s] ...                     \r" "$cmd_summary"
 
-  # Execute the actual command as root
   as_root "$@"
-  local cmd_status=$?
+  cmd_status=$?
 
-  # Clear the line and print a success or fail checkmark
   if [ $cmd_status -eq 0 ]; then
     printf "  \033[32m✓\033[0m Completed: [%s]                               \n" "$cmd_summary"
   else
@@ -438,11 +433,10 @@ tune_apache2() {
   ExpiresActive On
   ExpiresDefault \"access plus 1 month\"
 </IfModule>"
-
-    write_dropin "$apache_perf_conf"
-    if have a2enconf; then
-      run_root a2enconf stardust-perf >/dev/null 2>&1 || true
-    fi
+  fi
+  printf '%s\n' "$body" | write_dropin "$apache_perf_conf"
+  if have a2enconf; then
+    run_root a2enconf stardust-perf >/dev/null 2>&1 || true
   fi
   echo "Apache2 tuned for performance."
 }
