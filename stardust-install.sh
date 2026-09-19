@@ -1231,8 +1231,14 @@ while [ $# -gt 0 ]; do
     -n) DRYRUN=1 ;;
     -lh|--localhost) LOCALHOST=1 ;;
     -F) DO_CSF=1 ;;
-    -m) ROLE=$(normalize_role "${2:-}"); shift ;;
-    -u) OWNER=${2:-}; shift ;;
+    -m) 
+      ROLE=$(normalize_role "$2")
+      # FIX: If the user explicitly sets the role to devel, force LOCALHOST to 1
+      if [ "$ROLE" = "devel" ]; then
+        LOCALHOST=1
+      fi
+                      shift ;;
+    -u) OWNER=$2;     shift ;;
     -a) ADMIN=${2:-}; shift ;;
     -H) HUMAN=${2:-}; shift ;;
     -g) GROUP=${2:-}; shift ;;
