@@ -349,13 +349,13 @@ install_apache2() {
 tune_apache2() {
   # Enable performance modules
   if have a2enmod; then
-    run_root a2enmod mpm_event
-    run_root a2enmod proxy_fcgi
-    run_root a2enmod setenvif
-    run_root a2enmod deflate
-    run_root a2enmod expires
-    run_root a2enmod cache
-    run_root a2enmod headers
+    run_root a2enmod -q mpm_event
+    run_root a2enmod -q proxy_fcgi
+    run_root a2enmod -q setenvif
+    run_root a2enmod -q deflate
+    run_root a2enmod -q expires
+    run_root a2enmod -q cache
+    run_root a2enmod -q headers
   fi
 
   # Write performance config
