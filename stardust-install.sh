@@ -654,35 +654,31 @@ install_gitea() {
       "Gitea is a lightweight, self-hosted Git service for managing repositories. It is optional but recommended for Stardust workflows."
     if [ "$ans" = "Y" ] || [ "$ans" = "y" ]; then
       
-      echo "🔍 Querying stable repository releases for target binary..."
+      echo "🌐 Downloading the absolute latest stable Gitea binary from mirror..."
       
-      # 1. Query Gitea's JSON endpoint to parse out the latest version string programmatically
-      if have jq && have curl; then
-        LATEST_VERSION=$(curl -s https://dl.gitea.com/gitea/version.json | jq .latest.version -Mr)
-      else
-        # Safe fallback if jq isn't built into the active execution frame yet
-        LATEST_VERSION="1.27.3" 
-      fi
-
-      echo "🌐 Downloading Gitea v${LATEST_VERSION} Linux-amd64 binary..."
-      
-      # 2. Download the pre-compiled binary artifact safely into a temporary buffer folder
       if [ "$DRYRUN" -eq 1 ]; then
-        echo "+ wget -O /tmp/gitea https://gitea.com{LATEST_VERSION}/gitea-${LATEST_VERSION}-linux-amd64"
+        echo "+ wget -O /tmp/gitea https://gitea.com"
       else
-        run_root mkdir -p /tmp
-        run_root wget -q --show-progress -O /tmp/gitea "https://gitea.com{LATEST_VERSION}/gitea-${LATEST_VERSION}-linux-amd64"
+        # Force a fresh clean scratch directory
+        as_root mkdir -p /tmp
+        
+        # FIX: Targeted the 'latest' alias symlink path directly. 
+        # This completely side-steps unstable jq/json lookups and won't trip strict mode traps.
+        as_root wget -q --show-progress -O /tmp/gitea "https://gitea.com"
       fi
 
-      echo "📦 Setting up system binary allocations..."
+      echo "📦 Aligning system execution locations..."
       
-      # 3. Use standard POSIX install flags to push it straight to your execution paths
+      # Use standard POSIX install paths to assign permissions and transfer binary
       run_root install -m 755 /tmp/gitea /usr/local/bin/gitea
-      run_root rm -f /tmp/gitea
+      
+      if [ "$DRYRUN" -eq 0 ]; then
+        as_root rm -f /tmp/gitea
+      fi
 
-      # 4. Fire up the background listener framework daemon
+      # Fire up the background listener daemon framework
       svc_start gitea
-      echo "Gitea binary installed successfully. Configure it at http://$(hostname):3000."
+      echo "Gitea binary installed successfully. Verify via: gitea --version"
     fi
   else
     echo "Gitea is already installed."
