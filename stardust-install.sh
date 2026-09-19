@@ -740,7 +740,7 @@ ensure_group() {
 
 ensure_user() {
   name=$1
-  comment=$2
+  comment=${2:-"Stardust Operator"}
   if id "$name" >/dev/null 2>&1; then
     echo "user ok: $name"
   else
@@ -1206,11 +1206,11 @@ while [ $# -gt 0 ]; do
     -n) DRYRUN=1 ;;
     -lh|--localhost) LOCALHOST=1 ;;
     -F) DO_CSF=1 ;;
-    -m) ROLE=$(normalize_role "$2"); shift ;;
-    -u) OWNER=$2; shift ;;
-    -a) ADMIN=$2; shift ;;
-    -H) HUMAN=$2; shift ;;
-    -g) GROUP=$2; shift ;;
+    -m) ROLE=$(normalize_role "${2:-}"); shift ;;
+    -u) OWNER=${2:-}; shift ;;
+    -a) ADMIN=${2:-}; shift ;;
+    -H) HUMAN=${2:-}; shift ;;
+    -g) GROUP=${2:-}; shift ;;
     -h) usage; exit 0 ;;
     *) echo "$PROG: unknown flag $1" >&2; exit 1 ;;
   esac
