@@ -789,7 +789,10 @@ ensure_user() {
 
 write_sudoers() {
   dest=$1
-  body=$2
+  
+  # FIX: Read the multi-line heredoc from stdin instead of $2
+  body=$(cat)
+  
   if [ "$DRYRUN" -eq 1 ]; then
     echo "+ write $dest"
     printf '%s\n' "$body" | sed 's/^/+ /'
