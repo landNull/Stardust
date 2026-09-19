@@ -369,16 +369,53 @@ install_apache2() {
 }
 
 tune_apache2() {
-  # Enable performance modules
-  if have a2enmod; then
-    run_root a2enmod -q mpm_event
-    run_root a2enmod -q proxy_fcgi
-    run_root a2enmod -q setenvif
-    run_root a2enmod -q deflate
-    run_root a2enmod -q expires
-    run_root a2enmod -q cache
-    run_root a2enmod -q headers
+  echo "  ⚙ Configuring Apache modules safely..."
+
+  # Create directories if they don't exist yet
+  run_root mkdir -p /etc/apache2/mods-enabled
+
+  # Manually symlink performance modules (exactly what a2enmod does)
+  # This prevents invoke-rc.d from calling systemd and hanging on Devuan
+  for mod in mpm_event proxy_fcgi setenvif deflate expires cache headers; do
+    if [ -f "/etc/apache2/mods-available/${mod}.load" ]; then
+      run_root ln -sf "../mods-available/${mod}.load" "/etc/apache2/mods-enabled/${mod}.load"
+    fi
+    if [ -f "/etc/apache2/mods-available/${mod}.conf" ]; then
+      run_root ln -sf "../mods-available/${mod}.conf" "/etc/apache2/mods-enabled/${mod}.conf"
+    fi
+  done
+
+  # Write performance config snippet
+  apache_perf_conf="/etc/apache2/conf-available/stardust-perf.conf"
+  if [ "$PKG" = "apt" ] || [ "$PKG" = "dnf" ] || [ "$PKG" = "yum" ]; then
+    body="<IfModule mpm_event_module>
+  StartServers 2
+  MinSpareThreads 25
+  MaxSpareThreads 75
+  ThreadLimit 64
+  ThreadsPerChild 25
+  MaxRequestWorkers 150
+  MaxConnectionsPerChild 1000
+</IfModule>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript
+</IfModule>
+
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresDefault \"access plus 1 month\"
+</IfModule>"
+
+    printf '%s\n' "$body" | write_dropin "$apache_perf_conf"
+    
+    # Manually enable the stardust configuration drop-in
+    run_root mkdir -p /etc/apache2/conf-enabled
+    run_root ln -sf "../conf-available/stardust-perf.conf" /etc/apache2/conf-enabled/stardust-perf.conf
   fi
+  echo "Apache2 tuned for performance via manual symlinks."
+}
+
 
   # Write performance config
   apache_perf_conf="/etc/apache2/conf-available/stardust-perf.conf"
