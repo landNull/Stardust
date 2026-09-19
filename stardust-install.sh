@@ -143,7 +143,29 @@ run_root() {
     printf '\n'
     return 0
   fi
+
+  # ─── REAL-TIME STATUS GUTTER ───
+  # Capture the command name and its first argument for a punchy layout
+  local cmd_summary="$1"
+  if [ -n "${2:-}" ]; then
+    cmd_summary="$cmd_summary $2"
+  fi
+  
+  # Print the "Processing" line using a carriage return (\r) so we can overwrite it later
+  # The trailing spaces clear out artifacts from previous longer lines
+  printf "  \033[33m⏳ Processing:\033[0m [%s] ...                     \r" "$cmd_summary"
+
+  # Execute the actual command as root
   as_root "$@"
+  local cmd_status=$?
+
+  # Clear the line and print a success or fail checkmark
+  if [ $cmd_status -eq 0 ]; then
+    printf "  \033[32m✓\033[0m Completed: [%s]                               \n" "$cmd_summary"
+  else
+    printf "  \033[31m✗\033[0m Failed (%s): [%s]                             \n" "$cmd_status" "$cmd_summary"
+    return $cmd_status
+  fi
 }
 
 have() {
@@ -1235,17 +1257,21 @@ detect_services
 ROLE=$(normalize_role "$ROLE")
 
 # Print welcome message
+echo "===================================================="
 echo "$PROG $STARDUST_VERSION — Starting Stardust installation..."
-echo "Role: $ROLE"
-echo "User: $HUMAN"
-echo "Owner: $OWNER"
+echo "===================================================="
+echo "Role: $ROLE | User: $HUMAN | Init: $INIT" 
+echo "Owner: $OWNER" 
 echo "Admin: $ADMIN"
 echo "Group: $GROUP"
 echo "Platforms: $PLATFORMS"
 echo "Stardust: $STARDUST"
+echo "===================================================="
 echo
 
 # Install dependencies in order
+echo "📦 PHASE 1: Installing Core Dependencies"
+echo "----------------------------------------"
 install_apache2
 install_php
 install_mariadb
@@ -1255,6 +1281,8 @@ install_gitea
 install_extras
 
 # Tune all apps for performance and security
+echo "⚙️ PHASE 2: Performance Tuning & Optimization"
+echo "----------------------------------------"
 tune_php
 tune_apache2
 tune_mysql
@@ -1263,6 +1291,8 @@ tune_extras
 tune_logrotate
 
 # Create users and groups
+echo "👥 PHASE 3: System Users & Security Policy"
+echo "----------------------------------------"
 ensure_group "$GROUP"
 ensure_group stardust
 ensure_group adm
