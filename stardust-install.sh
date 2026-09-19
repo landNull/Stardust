@@ -369,8 +369,7 @@ tune_apache2() {
   # Create directories if they don't exist yet
   run_root mkdir -p /etc/apache2/mods-enabled
 
-  # Manually symlink performance modules (exactly what a2enmod does)
-  # This prevents invoke-rc.d from calling systemd and hanging on Devuan
+  # Manually symlink performance modules
   for mod in mpm_event proxy_fcgi setenvif deflate expires cache headers; do
     if [ -f "/etc/apache2/mods-available/${mod}.load" ]; then
       run_root ln -sf "../mods-available/${mod}.load" "/etc/apache2/mods-enabled/${mod}.load"
@@ -402,7 +401,15 @@ tune_apache2() {
   ExpiresDefault \"access plus 1 month\"
 </IfModule>"
 
-    printf '%s\n' "$body" | write_dropin "$apache_perf_conf"
+    # FIX: Writing the file directly using a root subshell 
+    # instead of calling the missing or out-of-order write_dropin function
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ write $apache_perf_conf"
+    else
+      run_root mkdir -p "/etc/apache2/conf-available"
+      printf '%s\n' "$body" | as_root sh -c "cat > '$apache_perf_conf'"
+      echo "wrote $apache_perf_conf"
+    fi
     
     # Manually enable the stardust configuration drop-in
     run_root mkdir -p /etc/apache2/conf-enabled
@@ -410,7 +417,6 @@ tune_apache2() {
   fi
   echo "Apache2 tuned for performance via manual symlinks."
 }
-
 
   # Write performance config
   apache_perf_conf="/etc/apache2/conf-available/stardust-perf.conf"
