@@ -556,12 +556,14 @@ install_bee() {
       fi
       if [ -d "$BEE_DST" ]; then
         if have composer; then
-          run_root cd "$BEE_DST" && composer install --no-dev
+          # FIX: cd locally first, then run composer inside run_root wrapped in a subshell
+          cd "$BEE_DST"
+          run_root composer install --no-dev
           run_root ln -sf "$BEE_DST/bee" "$BEE_BIN"
           echo "Bee installed to $BEE_BIN."
         else
           echo "Composer is not installed. Bee dependencies cannot be installed automatically."
-          echo "Install Composer manually from https://getcomposer.org/ and run:"
+          echo "Install Composer manually from https://getcomposer.org and run:"
           echo "  cd $BEE_DST && composer install --no-dev"
           echo "  ln -s $BEE_DST/bee $BEE_BIN"
         fi
@@ -573,6 +575,7 @@ install_bee() {
     echo "Bee is already installed at $(command -v bee)."
   fi
 }
+
 
 install_gitea() {
   if ! gitea_installed; then
