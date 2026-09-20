@@ -12,20 +12,29 @@ purge_package_framework() {
     echo "🚨 Purge flag detected! Stripping core engines and software dependencies..."
     
     if [ "$DRYRUN" -eq 1 ]; then
-      echo "+ apt-get purge -y $APT_PACKAGES && apt-get autoremove -y"
+      echo "+ DEBIAN_FRONTEND=noninteractive apt-get purge -y -o Dpkg::Options::=\"--force-confnew\" $APT_PACKAGES"
+      echo "+ apt-get autoremove -y"
       echo "+ rm -rf /usr/local/bin/bee /usr/local/src/bee"
       echo "+ rm -f /usr/local/bin/gitea"
     else
-      # 1. Stop active daemons before uninstalling to prevent hanging process states
+      # 1. FIX: Do NOT hide stdout/stderr entirely here during service teardowns.
+      # If a daemon is stuck, we need to see it fail rather than masking a hang.
       echo "  Stopping background application listeners..."
-      as_root /etc/init.d/apache2 stop >/dev/null 2>&1 || true
-      as_root /etc/init.d/mysql stop >/dev/null 2>&1 || true
-      as_root /etc/init.d/gitea stop >/dev/null 2>&1 || true
+      as_root /etc/init.d/apache2 stop || true
+      as_root /etc/init.d/mysql stop || true
+      as_root /etc/init.d/gitea stop || true
 
-      # 2. Force purge apt-managed software environments
-      echo "  Purging system repository packages via apt..."
-      as_root apt-get purge -y $APT_PACKAGES >/dev/null 2>&1 || true
-      as_root apt-get autoremove -y >/dev/null 2>&1 || true
+      # 2. FIX: Force apt-get into a completely silent, noninteractive posture.
+      # We append strict dpkg override rules to pass through conffile prompts cleanly.
+      echo "  Purging system repository packages via apt (Non-interactive Mode)..."
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get purge -y \
+        -o Dpkg::Options::="--force-confbp" \
+        -o Dpkg::Options::="--force-confold" \
+        $APT_PACKAGES
+      
+      echo "  Cleaning up trailing dependency artifacts..."
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get autoremove -y --purge
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get clean
       
       # 3. Wipe out structural manual download folders and compiled paths
       echo "  Deleting manual scripted binary installations..."
