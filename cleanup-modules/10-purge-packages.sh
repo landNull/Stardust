@@ -24,12 +24,12 @@ purge_package_framework() {
       as_root /etc/init.d/mysql stop || true
       as_root /etc/init.d/gitea stop || true
 
-      # 2. FIX: Force apt-get into a completely silent, noninteractive posture.
-      # We append strict dpkg override rules to pass through conffile prompts cleanly.
+      # 2. Force apt-get into a completely silent, non-interactive posture
+      # FIX: Removed the invalid 'confbp' flag and applied standard POSIX overrides
       echo "  Purging system repository packages via apt (Non-interactive Mode)..."
       as_root env DEBIAN_FRONTEND=noninteractive apt-get purge -y \
-        -o Dpkg::Options::="--force-confbp" \
         -o Dpkg::Options::="--force-confold" \
+        -o Dpkg::Options::="--force-confmiss" \
         $APT_PACKAGES
       
       echo "  Cleaning up trailing dependency artifacts..."
