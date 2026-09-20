@@ -64,6 +64,8 @@ install_git() {
   fi
 }
 
+# Inside modules/10-dependencies.sh — Fix for install_bee() error path
+
 install_bee() {
   if ! command -v bee >/dev/null 2>&1; then
     install_prompt "Install Bee (Backdrop CMS CLI)? [Y/n]" "Y" "Bee is required for Stardust operations."
@@ -77,7 +79,9 @@ install_bee() {
           echo "Composer is not installed. Bee dependencies cannot be installed automatically."
         fi
       else
-        error "Failed to clone Bee repository."
+        # FIX: Replaced the non-existent 'error' command with a standard error echo redirection
+        echo "❌ Error: Failed to clone Bee repository." >&2
+        return 1
       fi
     fi
   else
