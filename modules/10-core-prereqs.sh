@@ -2,13 +2,17 @@
 # ==============================================================================
 # modules/10-core-prereqs.sh — Shared Prerequisites, Groups, Accounts, and Users
 # ==============================================================================
-# Engineered for strict POSIX compliance.
-# Fixes short-circuit syntax drops and builds out missing user configuration maps.
+# Engineered for strict POSIX compliance (/bin/sh compatibility).
+# Protects against silent set -eu drops and duplicate user account collisions.
 # ==============================================================================
 
 echo "👥 STEP 10: Provisioning Platform Prerequisites and Core Accounts"
 echo "------------------------------------------------------------------"
 
+# ------------------------------------------------------------------------------
+# Function: prereqs_install_packages
+# Purpose: Idempotently maps and installs underlying OS packages based on $PKG.
+# ------------------------------------------------------------------------------
 prereqs_install_packages() {
   echo "  ⚙️ Syncing system toolsets..."
   case $PKG in
@@ -16,7 +20,7 @@ prereqs_install_packages() {
       # Deploys standard terminal processing modules natively
       pkg_install git curl unzip rsync acl msmtp-mta unattended-upgrades needrestart logwatch goaccess etckeeper smartmontools irqbalance haveged moreutils jq pv age
       
-      # --- FIX: Standardized explicit structured block syntax prevents short-circuit drops ---
+      # Structured explicit block syntax prevents short-circuit evaluation drops
       if [ "$LOCALHOST" -eq 1 ] || [ "$ROLE" = "devel" ]; then
         pkg_install dnsmasq
       fi
@@ -51,11 +55,14 @@ prereqs_install_packages() {
   esac
 }
 
-# --- FIX: Re-integrated the missing user_conf utility into the prerequisite space ---
+# ------------------------------------------------------------------------------
+# Function: user_conf
+# Purpose: Generates localized environment profiles for individual system users.
+# ------------------------------------------------------------------------------
 user_conf() {
   target_user=$1
   
-  # POSIX cut filter maps the 6th configuration column to read the home folder pathway
+  # POSIX cut filter maps the 6th configuration column to read the home folder pathway safely
   user_home=$(getent passwd "$target_user" 2>/dev/null | cut -d: -f6)
   [ -z "$user_home" ] && user_home="/home/$target_user"
   
@@ -79,6 +86,10 @@ EOF
   as_root chmod 0600 "$user_dest"
 }
 
+# ------------------------------------------------------------------------------
+# Function: prereqs_enforce_security
+# Purpose: Allocates groups, system accounts, and locks down SSH security flags.
+# ------------------------------------------------------------------------------
 prereqs_enforce_security() {
   echo "  ⚙️ Constructing security user profiles and account partitions..."
   
@@ -98,20 +109,23 @@ prereqs_enforce_security() {
     uname="${u%%:*}"
     ucomment="${u##*:}"
     
-    # Check if the user already exists in the system master password index file
+    # --- FIXED: IDEMPOTENCY GUARD ---
+    # Only execute user creation commands if the account name is completely unregistered.
+    # This prevents the script from throwing Exit Code 9 (username already in use) errors.
     if ! id "$uname" >/dev/null 2>&1; then
-      # --- FIX: Re-sequenced priority order to favor universal, clean POSIX useradd flags ---
       if have useradd; then
         run_root useradd -m -s /bin/bash -c "$ucomment" -G "$GROUP" "$uname"
       elif have adduser && [ "$PKG" = "apt" ]; then
         run_root adduser --disabled-password --gecos "$ucomment" --ingroup "$GROUP" "$uname"
       else
-        # Safe fallback for lightweight systems (like BusyBox/Alpine variants)
+        # Safe fallback for bare-minimum POSIX platforms
         run_root useradd -m -G "$GROUP" "$uname"
       fi
+    else
+      echo "  user ok: $uname (already exists, skipping creation)"
     fi
     
-    # Append group memberships securely across distributions
+    # Safely append group memberships cleanly across systems
     if [ "$DRYRUN" -eq 1 ]; then 
       echo "+ usermod -aG $GROUP $uname"
     else 
@@ -142,7 +156,7 @@ $ADMIN ALL=(ALL) NOPASSWD: /usr/local/bin/stardust, /usr/local/bin/crdir, /usr/l
 EOF
   fi
 
-  # Call our newly added user configuration engine mapping parameters to the accounts
+  # Call our user configuration engine mapping parameters to the accounts
   for user_profile in "$OWNER" "$ADMIN" "$HUMAN"; do
     if [ -n "$user_profile" ]; then
       user_conf "$user_profile"
@@ -150,7 +164,9 @@ EOF
   done
 }
 
-# Execute internal orchestration targets
+# ------------------------------------------------------------------------------
+# 4. EXECUTION GATEWAY
+# ------------------------------------------------------------------------------
 prereqs_install_packages
 prereqs_enforce_security
 
