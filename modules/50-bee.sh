@@ -1,45 +1,45 @@
 # modules/50-bee.sh
 # App-Centric Worker: Backdrop CMS Bee Companion Command Line Interface
-# Patched to safely bypass network actions during dry-run validations.
+# Refactored for absolute structural stability over bleeding-edge tracking.
 
-echo "🐝 STEP 50: Provisioning Backdrop CMS CLI (Bee)"
-echo "-----------------------------------------------"
+echo "🐝 STEP 50: Provisioning Backdrop CMS CLI (Bee) via Stable Composer"
+echo "------------------------------------------------------------------"
 
-bee_install_core() {
+bee_install_stable() {
   if ! command -v bee >/dev/null 2>&1; then
-    install_prompt "Install Bee (Backdrop CMS CLI)? [Y/n]" "Y" "Bee handles rapid site profile deployments."
+    install_prompt "Install Bee utility globally via Composer? [Y/n]" "Y" "Installs bee package to system path structures."
     if [ "$ans" = "Y" ] || [ "$ans" = "y" ]; then
       
-      # --- FIX: Intercept network operations if running under Dry-Run conditions ---
+      # Ensure dry-runs validate loop flows completely clean
       if [ "$DRYRUN" -eq 1 ]; then
-        echo "+ git clone $BEE_SRC $BEE_DST"
-        echo "  ✓ Simulated Bee installation sequence complete (Dry-Run Mode)."
+        echo "+ COMPOSER_ALLOW_SUPERUSER=1 composer global require backdrop/bee:^1.0 --no-dev"
+        echo "+ ln -sf /root/.composer/vendor/bin/bee $BEE_BIN"
+        echo "  ✓ Simulated stable Bee Composer installation complete (Dry-Run Mode)."
         return 0
       fi
 
-      if [ ! -d "$BEE_DST" ]; then
-        run_root git clone "$BEE_SRC" "$BEE_DST"
-      fi
-      
-      if [ -d "$BEE_DST" ]; then
-        if have composer; then
-          (
-            cd "$BEE_DST"
-            run_root composer install --no-dev
-            run_root ln -sf "$BEE_DST/bee" "$BEE_BIN"
-          )
-          echo "  ✓ Bee installation sequence complete."
+      if have composer; then
+        echo "  ⚙️ Retrieving verified stable backdrop/bee package layer..."
+        
+        # Enforce strict production optimizations and prevent execution boundaries bleeding
+        run_root env COMPOSER_ALLOW_SUPERUSER=1 composer global require "backdrop/bee:^1.0" --no-dev --optimize-autoloader
+        
+        # Build the system link explicitly out to the global execution path
+        if [ -f /root/.composer/vendor/bin/bee ]; then
+          run_root ln -sf /root/.composer/vendor/bin/bee "$BEE_BIN"
+          echo "  ✓ Stable Bee CLI utility successfully linked to execution pathways."
         else
-          echo "  ⚠️ Composer missing. Cannot auto-compile packages."
+          echo "  ❌ Error: Global Composer bin path could not locate active bee execution tracks." >&2
+          return 1
         fi
       else
-        echo "❌ Error: Failed to execute Git source tracking download for Bee." >&2
+        echo "  ❌ Error: Composer system package manager not found. Unable to guarantee stability rules." >&2
         return 1
       fi
     fi
   else
-    echo "  Bee CLI utility is already linked to execution paths."
+    echo "  Bee CLI utility is already registered on system paths."
   fi
 }
 
-bee_install_core
+bee_install_stable
