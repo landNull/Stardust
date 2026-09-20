@@ -98,17 +98,16 @@ prereqs_enforce_security() {
     uname="${u%%:*}"
     ucomment="${u##*:}"
     
+    # Check if the user already exists in the system master password index file
     if ! id "$uname" >/dev/null 2>&1; then
-      if [ "$DRYRUN" -eq 1 ]; then
-        echo "+ useradd -m -G $GROUP $uname"
+      # --- FIX: Re-sequenced priority order to favor universal, clean POSIX useradd flags ---
+      if have useradd; then
+        run_root useradd -m -s /bin/bash -c "$ucomment" -G "$GROUP" "$uname"
+      elif have adduser && [ "$PKG" = "apt" ]; then
+        run_root adduser --disabled-password --gecos "$ucomment" --ingroup "$GROUP" "$uname"
       else
-        if [ "$PKG" = "apt" ] && have adduser; then
-          run_root adduser --disabled-password --gecos "$ucomment" --ingroup "$GROUP" "$uname"
-        elif have useradd; then
-          run_root useradd -m -s /bin/bash -c "$ucomment" -G "$GROUP" "$uname"
-        else
-          run_root adduser -D -s /bin/ash -G "$GROUP" "$uname"
-        fi
+        # Safe fallback for lightweight systems (like BusyBox/Alpine variants)
+        run_root adduser -D -G "$GROUP" "$uname"
       fi
     fi
     
