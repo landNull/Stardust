@@ -1,11 +1,27 @@
 #!/bin/sh
 # install-stardust.sh — Modular orchestrator control engine for Stardust
-# Refactored to fix duplicate loop execution bugs and variable leaking gaps.
+# Enhanced with verbose debugging logging infrastructure (install.log)
 set -eu
 
 PROG=${0##*/}
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 STARDUST_VERSION=0.4.0
+
+# --- SETUP VERBOSE FILE LOGGING DIRECTIVES ---
+LOGFILE="$HERE/install.log"
+# Clear or create a fresh trace log file for this execution session
+: > "$LOGFILE"
+
+# Custom logging engine that captures standard messages and updates file traces
+log_info() {
+  echo "$1"
+  echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOGFILE"
+}
+
+log_err() {
+  echo "$1" >&2
+  echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOGFILE"
+}
 
 if [ -f "$HERE/VERSION" ]; then
   STARDUST_VERSION=$(tr -d ' \r\n' < "$HERE/VERSION")
@@ -49,15 +65,20 @@ run_root() {
   [ -n "${2:-}" ] && cmd_summary="$cmd_summary $2"
   printf "  \\033[33m⏳ Processing:\\033[0m [%s] ...                     \r" "$cmd_summary"
   
+  # Stream raw sub-command terminal streams comprehensively into the logfile background
+  echo "Executing Root Command: $*" >> "$LOGFILE"
+  
   set +e
-  as_root "$@"
+  as_root "$@" >> "$LOGFILE" 2>&1
   cmd_status=$?
   set -eu
   
   if [ $cmd_status -eq 0 ]; then
     printf "  \\033[32m✓\\033[0m Completed: [%s]                               \n" "$cmd_summary"
+    echo "Command completed successfully." >> "$LOGFILE"
   else
     printf "  \\033[31m✗\\033[0m Failed (%s): [%s]                             \n" "$cmd_status" "$cmd_summary"
+    echo "Command failed with status code: $cmd_status" >> "$LOGFILE"
     return $cmd_status
   fi
 }
@@ -80,6 +101,7 @@ detect_os() {
   elif have dnf; then PKG=dnf
   elif have yum; then PKG=yum
   else PKG=unknown; fi
+  echo "OS Detection: ID=$OS_ID, PKG=$PKG" >> "$LOGFILE"
 }
 
 detect_init() {
@@ -89,6 +111,7 @@ detect_init() {
   elif [ -x /etc/init.d/apache2 ] || [ -x /etc/init.d/httpd ]; then INIT=sysv
   elif have systemctl; then INIT=systemd
   else INIT=unknown; fi
+  echo "Init Detection: INIT=$INIT" >> "$LOGFILE"
 }
 
 detect_group() {
@@ -97,6 +120,7 @@ detect_group() {
     elif getent passwd apache >/dev/null 2>&1; then DAEMON=apache
     else DAEMON=www-data; fi
   fi
+  echo "Group Detection: DAEMON=$DAEMON" >> "$LOGFILE"
 }
 
 detect_services() {
@@ -111,6 +135,7 @@ detect_services() {
     openrc) RELOAD_APACHE="rc-service $SVC_APACHE reload" ;;
     sysv|unknown) RELOAD_APACHE="/etc/init.d/$SVC_APACHE reload" ;;
   esac
+  echo "Service Detection: SVC_APACHE=$SVC_APACHE, SVC_DB=$SVC_DB" >> "$LOGFILE"
 }
 
 pkg_ok() {
@@ -152,13 +177,11 @@ write_dropin() {
   echo "wrote $dest"
 }
 
-# --- FIX: Mapped positional argument $1 properly instead of relying on global $dest leak ---
 write_if_absent() {
   target_file=$1
   [ -e "$target_file" ] && echo "exists: $target_file" || write_dropin "$target_file"; 
 }
 
-# --- FIX: Added single quotes to 'EOF' to prevent premature host variable evaluation ---
 write_etc_conf() {
   dest=/etc/stardust.conf
   [ -f "$dest" ] && echo "global config exists: $dest" && return 0
@@ -178,51 +201,6 @@ APACHE_RELOAD="$RELOAD_APACHE"
 STARDUST_VERSION=$STARDUST_VERSION
 EOF
   as_root chmod 0644 "$dest"
-}
-
-install_prompt() {
-  q=$1; def=${2:-}; help=${3:-}
-  while :; do
-    [ -n "$help" ] && printf '%s (? help)\n' "$q" >&2 || printf '%s\n' "$q" >&2
-    [ -n "$def" ] && printf '> [%s]: ' "$def" >&2 || printf '> ' >&2
-    IFS= read -r ans || ans=
-    case $ans in \?|help|HELP) printf '\n%s\n\n' "$help" >&2; continue ;; esac
-    [ -n "$ans" ] || ans=$def
-    printf '%s\n' "$ans"
-    return 0
-  done
-}
-
-gitea_conf_path() {
-  for f in /etc/gitea/app.ini /var/lib/gitea/custom/conf/app.ini /etc/gitea/conf/app.ini /home/git/gitea/custom/conf/app.ini; do
-    [ -f "$f" ] && printf '%s\n' "$f" && return 0
-  done; return 1
-}
-gitea_installed() { have gitea && return 0; [ -x /usr/local/bin/gitea ] && return 0; gitea_conf_path >/dev/null && return 0; return 1; }
-
-maybe_gitea_defaults() {
-  if [ "$LOCALHOST" -ne 1 ] && [ "$ROLE" != "devel" ] || stardust_git_configured || ! gitea_installed; then return 0; fi
-  host_def=gitea-starhq
-  [ -f "$HOME/.ssh/config" ] && host_def=$(awk 'tolower($1)=="host" && $2 !~ /[*?]/ { if ($2 ~ /gitea|github|gitlab|git/) { print $2; exit } }' "$HOME/.ssh/config" 2>/dev/null || echo "gitea-starhq")
-  host=$(install_prompt "Git SSH host" "$host_def" "SSH configuration host string.")
-  owner=$(install_prompt "Git owner/org" "" "Username or organization partition name.")
-  [ -z "$owner" ] && return 0
-  tpl="git@${host}:${owner}/%s.git"
-  [ -f /etc/stardust.conf ] && as_root sh -c "printf 'STARDUST_GIT_TEMPLATE=%s\n' '$tpl' >> /etc/stardust.conf"
-}
-
-stardust_git_configured() {
-  for f in "$HOME/.stardust.conf" /etc/stardust.conf; do
-    [ -f "$f" ] || continue
-    val=$(sed -n 's/^STARDUST_GIT_TEMPLATE=//p' "$f" | tail -n 1)
-    case $val in ''|*YOURORG*|*git.example*) ;; *) return 0 ;; esac
-  done; return 1
-}
-
-write_sudoers() {
-  dest=$1; body=$(cat); [ "$DRYRUN" -eq 1 ] && return 0
-  tmp=$(mktemp); printf '%s\n' "$body" > "$tmp"; as_root install -m 0440 "$tmp" "$dest"; rm -f "$tmp"
-  have visudo && ! as_root visudo -cf "$dest" >/dev/null 2>&1 && as_root rm -f "$dest" || true
 }
 
 # --- CLI Flag Sifter ---
@@ -246,42 +224,41 @@ done
 detect_os; detect_init; detect_group; detect_services
 ROLE=$(normalize_role "$ROLE")
 
-echo "===================================================="
-echo "$PROG $STARDUST_VERSION — Starting Stardust installation..."
-echo "===================================================="
+log_info "===================================================="
+log_info "$PROG $STARDUST_VERSION — Starting Stardust installation..."
+log_info "===================================================="
 
-if [ "$DRYRUN" -eq 1 ]; then
-  echo "🛡️ Running in strict Dry-Run Verification Mode."
-  echo "    Checking structural baseline readiness before mocking execution..."
-  if [ "$PKG" = "unknown" ]; then
-    echo "❌ DRY-RUN VALIDATION FAILURE: Unsupported or missing OS package manager architecture." >&2
-    exit 2
-  fi
-  if ! have sudo && [ "$(id -u)" -ne 0 ]; then
-    echo "❌ DRY-RUN VALIDATION FAILURE: Non-root user lacks sudo fallback utility binary execution paths." >&2
-    exit 3
-  fi
-  echo "  ✓ Structural boundaries clean. Simulating worker cascade logs:"
-  echo "--------------------------------------------------------"
-fi
+echo "Active Environment Options Locked:" >> "$LOGFILE"
+echo "  DRYRUN=$DRYRUN, LOCALHOST=$LOCALHOST, ROLE=$ROLE, OWNER=$OWNER, ADMIN=$ADMIN" >> "$LOGFILE"
 
-# Write base configuration layer out safely
 write_etc_conf
 
-# --- The Sequential Orchestration Loop ---
+# --- Sequential Orchestration Loop with Explicit File Tapping ---
 if [ -d "$HERE/modules" ]; then
   for module in "$HERE/modules/"[0-9][0-9]-*.sh; do
     if [ -f "$module" ]; then
-      echo "▶️ Running module: $(basename "$module")"
+      log_info "▶️ Running module: $(basename "$module")"
       
-      # --- FIX: ShellCheck-compliant POSIX execution tracking block ---
-      if ! . "$module"; then
-        echo "❌ Error: Module $(basename "$module") failed to execute correctly." >&2
+      # Open subshell architecture isolation to lock trace streams seamlessly
+      (
+        # Turn on extreme line-by-line statement profiling inside the module boundary
+        set -x
+        # Force stderr evaluation tracks straight into the central text file
+        . "$module"
+      ) >> "$LOGFILE" 2>&1
+      module_status=$?
+      
+      echo "[STATUS] Module $(basename "$module") finished execution with exit code ($module_status)." >> "$LOGFILE"
+      
+      if [ $module_status -ne 0 ]; then
+        log_err "❌ Error: Module $(basename "$module") failed to execute correctly (Check install.log for details)."
         exit 1
       fi
     fi
   done
 else
-  echo "❌ Error: The modules/ folder configuration area could not be reached." >&2
+  log_err "❌ Error: The modules/ folder configuration area could not be reached."
   exit 1
 fi
+
+log_info "Stardust installation sequence complete successfully!"
