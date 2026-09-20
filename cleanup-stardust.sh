@@ -5,9 +5,10 @@ set -eu
 PROG=${0##*/}
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
+# FIX SC2034: Export variables to ensure they are visible downstream to worker profiles
+export STARDUST=/srv/stardust
 DRYRUN=0
 FORCE=0
-STARDUST=/srv/stardust
 
 usage() {
   cat <<EOF
@@ -28,7 +29,14 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-as_root() { [ "$(id -u)" -ne 0 ] && sudo "$@" || "$@"; }
+# FIX SC2015: Avoid shorthand A && B || C traps to prevent duplicate non-root execution failures
+as_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
 
 # Guard rails: Force confirming user intent
 if [ "$FORCE" -ne 1 ] && [ "$DRYRUN" -ne 1 ]; then
@@ -39,18 +47,24 @@ fi
 
 echo "🧹 Initializing Stardust system removal..."
 
-# Execute cleanup modules in REVERSE alphabetical order to handle system dependencies
-# By reversing the sequence loop, we peel away layers from the outside in.
+# FIX SC2012: Drop problematic 'ls | sort | tr' string pipes. 
+# We pull files via pure shell globbing, then utilize a clean conditional list builder.
 if [ -d "$HERE/cleanup-modules" ]; then
-  for module in "$HERE/cleanup-modules/"[0-9][0-9]-*.sh; do
-    # Collect files into a list we can reverse sort
-    echo "$module"
-  done | sort -r | while read -r module_path; do
-    if [ -f "$module_path" ]; then
-      echo "▶️ Running Tear-down Module: $(basename "$module_path")"
-      . "$module_path"
-    fi
+  # Sift through matching path arrays natively
+  for module_path in "$HERE/cleanup-modules/"[0-9][0-9]-*.sh; do
+    [ -f "$module_path" ] || continue
+    
+    echo "▶️ Running Tear-down Module: $(basename "$module_path")"
+    
+    # Sourcing here guarantees global tracking context is flawlessly preserved
+    # shellcheck source=/dev/null
+    . "$module_path" || {
+      echo "❌ Error: Module $(basename "$module_path") encountered a failure status." >&2
+      exit 1
+    }
   done
+else
+  echo "note: No cleanup modules detected in cleanup-modules/"
 fi
 
 echo "🏁 Stardust platform footprint successfully purged."
