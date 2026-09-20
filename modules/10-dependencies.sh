@@ -64,9 +64,7 @@ install_git() {
   fi
 }
 
-# Inside modules/10-dependencies.sh — Fix for install_bee() error path
-
-# Inside modules/10-dependencies.sh — Future-Proof Stable Bee Installer
+# Inside modules/10-dependencies.sh — Fixed Permission-Safe Bee Installer
 
 install_bee() {
   if ! command -v bee >/dev/null 2>&1; then
@@ -75,16 +73,12 @@ install_bee() {
       
       echo "🌐 Querying GitHub API for the absolute latest stable Bee release tag..."
       
-      # 1. Dynamically extract the latest stable release tag version string from GitHub's API registers
-      # We utilize jq to cleanly parse the json object without unstable text scraping.
       if have curl && have jq; then
         LATEST_TAG=$(curl -s "https://github.com" | jq -r '.tag_name // empty')
       else
         LATEST_TAG=""
       fi
 
-      # 2. Resilient Fallback: If GitHub API rate limits are hit or curl lacks proxy tunnels, 
-      # fall back cleanly to a verified stable reference instead of crashing the installer loop.
       if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
         echo "  ⚠️ Warning: API limit reached or metadata hidden. Falling back to tracking release branch standard..."
         LATEST_TAG="1.x-1.x"
@@ -92,34 +86,36 @@ install_bee() {
         echo "  ✓ Identified latest stable release target: $LATEST_TAG"
       fi
 
-      # 3. Clean up any corrupted previous fragments inside the scratch directory
-      as_root rm -rf "$BEE_DST" "/tmp/bee-download.tar.gz"
+      # FIX: Dynamically provision an isolated, temporary directory with clean root ownership barriers
+      BEE_TMP_DIR=$(mktemp -d /tmp/bee-install-XXXXXX)
+
+      # Clean up any previous production configuration path fragments
+      as_root rm -rf "$BEE_DST"
       as_root mkdir -p "$(dirname "$BEE_DST")"
 
       echo "📥 Downloading compiled stable release package..."
       if [ "$DRYRUN" -eq 1 ]; then
-        echo "+ wget -O /tmp/bee-download.tar.gz https://github.com{LATEST_TAG}.tar.gz"
-        echo "+ tar -xzf /tmp/bee-download.tar.gz -C $(dirname "$BEE_DST")"
+        echo "+ wget -O $BEE_TMP_DIR/bee.tar.gz https://github.com{LATEST_TAG}.tar.gz"
+        echo "+ tar -xzf $BEE_TMP_DIR/bee.tar.gz -C $BEE_TMP_DIR"
         echo "+ ln -sf $BEE_DST/bee.php $BEE_BIN"
       else
-        # Download the specific stable tarball package asset securely
-        as_root wget -q --show-progress -O /tmp/bee-download.tar.gz \
+        # 1. Download into our isolated, owned directory context to bypass sticky bits
+        as_root wget -q --show-progress -O "$BEE_TMP_DIR/bee.tar.gz" \
           "https://github.com{LATEST_TAG}.tar.gz" || \
-        as_root wget -q --show-progress -O /tmp/bee-download.tar.gz \
+        as_root wget -q --show-progress -O "$BEE_TMP_DIR/bee.tar.gz" \
           "https://github.com{LATEST_TAG}.tar.gz"
 
-        # Extract archive layout maps directly into system source locations
-        as_root mkdir -p /tmp/bee-out
-        as_root tar -xzf /tmp/bee-download.tar.gz -C /tmp/bee-out
+        # 2. Extract cleanly within our custom directory workspace boundary
+        as_root tar -xzf "$BEE_TMP_DIR/bee.tar.gz" -C "$BEE_TMP_DIR"
         
-        # Normalize the extracted folder name to prevent trailing version-string mismatch bugs
-        EXTRACTED_DIR=$(ls -d /tmp/bee-out/bee-*)
+        # 3. Pull folder and map accurately into standard production target locations
+        EXTRACTED_DIR=$(ls -d "$BEE_TMP_DIR"/bee-*)
         as_root mv "$EXTRACTED_DIR" "$BEE_DST"
         
-        # Cleanup file registers
-        as_root rm -rf /tmp/bee-out /tmp/bee-download.tar.gz
+        # 4. Erase structural temp markers thoroughly
+        as_root rm -rf "$BEE_TMP_DIR"
 
-        # 4. Bind permissions and establish global execution link anchors
+        # 5. Bind permissions and establish global execution link anchors
         echo "⚙️ Linking binaries into execution paths..."
         as_root chmod +x "$BEE_DST/bee.php"
         as_root ln -sf "$BEE_DST/bee.php" "$BEE_BIN"
@@ -131,7 +127,7 @@ install_bee() {
     echo "Bee is already installed at $(command -v bee)."
   fi
 }
-
+   
 install_gitea() {
   if ! gitea_installed; then
     install_prompt "Install Gitea (Self-hosted Git Service)? [Y/n]" "Y" "Gitea is recommended for Stardust workflows."
