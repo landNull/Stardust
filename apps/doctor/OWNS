@@ -1,0 +1,2 @@
+lib/doctor.sh
+verbs: doctor list env

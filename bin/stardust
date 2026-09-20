@@ -36,6 +36,7 @@ LIBDIR=$(find_lib) || {
   echo "$PROG: cannot find lib/common.sh. Clone the stardust repo and run ./stardust-install.sh from its root." >&2
   exit 1
 }
+export LIBDIR
 
 # shellcheck disable=SC1091
 . "$LIBDIR/common.sh"
@@ -57,6 +58,13 @@ LIBDIR=$(find_lib) || {
 . "$LIBDIR/promote.sh"
 # shellcheck disable=SC1091
 . "$LIBDIR/d7.sh"
+if [ -f "$LIBDIR/../apps/bee/lib.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$LIBDIR/../apps/bee/lib.sh"
+elif [ -f "$LIBDIR/bee.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$LIBDIR/bee.sh"
+fi
 
 usage() {
   cat <<EOF
@@ -80,6 +88,7 @@ $PROG 0.4.0 — manage Backdrop platforms and sites from the shell
   $PROG [-n] site-delete PLATFORM PRODUCT [--force]
   $PROG [-n] backup-all
   $PROG [-n] cron-all
+  $PROG [-n] bee PLATFORM PRODUCT [bee-verb…]   # Bee with --root/--site set
   $PROG [-n] d7 VERB …   # Drupal 7 / BOA -> Backdrop (see $PROG d7 help)
   stardust-menu          # gum / whiptail / dialog
   stardust-tui           # Bubble Tea full-screen; same verbs
@@ -192,6 +201,7 @@ dispatch() {
     inventory) cmd_inventory ;;
     backup-all) cmd_backup_all ;;
     cron-all) cmd_cron_all ;;
+    bee) cmd_bee "$@" ;;
     d7|d7-migrate) cmd_d7 "$@" ;;
     d7-prep) cmd_d7 prep "$@" ;;
     d7-assess) cmd_d7 assess "$@" ;;
@@ -221,7 +231,7 @@ case $cmd in
       exit "$rc"
     fi
     ;;
-  site-add|site-backup|site-clone|site-check|site-disable|site-enable|cron-all|platform-add|d7|d7-migrate|d7-prep|d7-assess|d7-test|d7-apply|d7-convert|d7-attach|d7-toolkit|d7-stubs|d7-port)
+  site-add|site-backup|site-clone|site-check|site-disable|site-enable|cron-all|platform-add|bee|d7|d7-migrate|d7-prep|d7-assess|d7-test|d7-apply|d7-convert|d7-attach|d7-toolkit|d7-stubs|d7-port)
     if dispatch "$@"; then
       task_log "$cmd $*" 0
     else

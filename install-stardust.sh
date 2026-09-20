@@ -1,304 +1,1386 @@
 #!/bin/sh
-# ==============================================================================
-# install-stardust.sh — Modular System Orchestrator and Control Engine
-# ==============================================================================
-# Designed strictly for POSIX compliance (/bin/sh compatibility).
-# Implements unified error trapping, safe env scoping, and automated module routing.
-# ==============================================================================
+# install-stardust.sh — idempotent bootstrap for Stardust
+# Same script on a devel workstation and a remote test/live host.
+# Contract: artifacts/stardust-settings.json
+#
+# Detects package manager and init. Does not assume Devuan or systemd.
+# Creates deploy + www-admin, ships crdir/newfeature/stardust, tunes
+# PHP/MariaDB/Apache, writes logrotate + state. No PHP GUI.
+# Does not wipe /srv/platforms or existing platform checkouts.
+# Does not install nginx, Podman, or rewrite firewall/VPN.
+#
+# Usage:
+#   stardust-install.sh [-n] [-m ROLE] [-u USER] [-g GROUP] [-a ADMIN]
+#   stardust-install.sh -h
+#
+# ROLE: devel | test | live
+#       devel, vps-test, vps-live still accepted as aliases.
 
-# ------------------------------------------------------------------------------
-# 1. ARCHITECTURAL SAFETY DIRECTIVES (The POSIX Guardrails)
-# ------------------------------------------------------------------------------
-# set -e: Instantly exit the script if any command returns a non-zero exit code.
-# set -u: Treat unset or unassigned variables as a fatal error and exit immediately.
-# Together, they prevent the script from running broken commands or corrupting paths.
 set -eu
 
-# ------------------------------------------------------------------------------
-# 2. RUNTIME ENVIRONMENT DETECTIONS & CONSTANTS
-# ------------------------------------------------------------------------------
-# PROG: Strips path wrappers to isolate the raw executable filename ($0).
-# HERE: Evaluates the absolute directory path of this script safely without 'readlink'.
 PROG=${0##*/}
-HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 STARDUST_VERSION=0.4.0
-
-# Define a persistent background log path to catch deep subcommand errors
-LOGFILE="$HERE/install.log"
-: > "$LOGFILE" # Pure POSIX idiom to cleanly truncate/create an empty file
-
-# Logging helpers that mirror messages to the terminal screen and background file
-log_info() {
-  echo "$1"
-  echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOGFILE"
-}
-
-log_err() {
-  echo "$1" >&2 # Direct the text error layout explicitly to stderr (Descriptor 2)
-  echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOGFILE"
-}
-
-# Source Code Layout Validation: Detect if running inside a Dev Repo or System Space
-if [ -d "$HERE/bin" ] && [ -d "$HERE/lib" ]; then
-  BINDIR=$HERE/bin; LIBSRC=$HERE/lib; MANDIR=$HERE/man; TUIDIR=$HERE/tui
-else
-  BINDIR=$HERE; LIBSRC=$HERE/stardust-lib; MANDIR=$HERE; TUIDIR=$HERE/stardust-tui
+if [ -f "$HERE/VERSION" ]; then
+  STARDUST_VERSION=$(tr -d ' \n' < "$HERE/VERSION")
 fi
-
-# ------------------------------------------------------------------------------
-# 3. GLOBAL ENGINE EXPORTS & DEFAULT SYSTEM CONSTRAINTS
-# ------------------------------------------------------------------------------
-# 'export' forces these flags down into subshells and sourced worker scripts.
-export DRYRUN=0        # Simulation flag (1 = dry run, 0 = live execution)
-export DO_CSF=0        # Firewall provisioning directive toggle
-export LOCALHOST=0     # Local isolation toggle
-export ROLE=devel      # Target deployment context tier (devel, test, live)
-
-# Establish permission accounts using fallback variable evaluation parameters
-export OWNER="${OWNER:-deploy}"
-export ADMIN="${ADMIN:-www-admin}"
-export GROUP="${GROUP:-www-admin}"
-
+if [ -d "$HERE/bin" ] && [ -d "$HERE/lib" ]; then
+  BINDIR=$HERE/bin
+  LIBSRC=$HERE/lib
+  MANDIR=$HERE/man
+  TUIDIR=$HERE/tui
+else
+  BINDIR=$HERE
+  LIBSRC=$HERE/stardust-lib
+  MANDIR=$HERE
+  TUIDIR=$HERE/stardust-tui
+fi
+DRYRUN=0
+DO_CSF=0
+LOCALHOST=0
+ROLE=devel
+OWNER=deploy
+ADMIN=www-admin
 HUMAN=""
 DAEMON=""
+GROUP=""
 PLATFORMS=/srv/platforms
-export STARDUST=/srv/stardust
+STARDUST=/srv/stardust
+CONF=""
+CSF_ALLOW="10.8.0.0/24 192.168.1.0/24"
 BEE_SRC=https://github.com/backdrop-contrib/bee.git
 BEE_DST=/usr/local/src/bee
 BEE_BIN=/usr/local/bin/bee
 
-# Dynamic environment matrices populated later via system probes
-export PKG=unknown
-export INIT=unknown
-export OS_ID=unknown
-export SVC_APACHE=""
-export SVC_DB=""
-export RELOAD_APACHE=""
+PKG=unknown
+INIT=unknown
+OS_ID=unknown
+SVC_APACHE=""
+SVC_DB=""
+RELOAD_APACHE=""
 
-# ------------------------------------------------------------------------------
-# 4. SYSTEM UTILITY ENGINES & COMPLIANCE HELPER FUNCTIONS
-# ------------------------------------------------------------------------------
+usage() {
+  cat <<EOF
+$PROG $STARDUST_VERSION — prepare any Stardust host (Apache + PHP + MariaDB + Bee)
 
-# Escalates execution privileges gracefully if not currently logged in as root
-as_root() { 
-  if [ "$(id -u)" -ne 0 ]; then sudo "$@"; else "$@"; fi 
+WHAT THIS IS FOR
+  One script for any host. Detects apt vs other managers and
+  sysvinit vs systemd vs OpenRC. Creates users deploy and www-admin,
+  the $STARDUST control plane, missing packages, PHP/MariaDB snippets,
+  companion CLIs (crdir, newfeature, stardust, bee), and conf files.
+  PHP: 30-stardust.ini every SAPI; 35-stardust-harden.ini FPM/apache2
+  only; 35-stardust-cli.ini leaves Bee able to exec.
+  Also: php-intl/bcmath/imagick/apcu, apache2-utils, mariadb-backup,
+  msmtp-mta, unattended-upgrades (no auto-reboot), needrestart,
+  logwatch, goaccess, etckeeper, smartmontools, irqbalance, haveged,
+  moreutils, jq, pv, age.
+  Leaves $PLATFORMS trees alone. No Aegir/BOA frontend.
+
+USERS
+  $OWNER      owns platforms and the control plane; limited sudo
+  $ADMIN      extra login that writes the same 0770 trees
+  operator    login that runs stardust day to day.
+                 Default: the account that invoked this script
+                 (SUDO_USER or USER), never a hard-coded name.
+                 Override with -H. Groups: $GROUP, stardust, adm, $OWNER.
+  $GROUP     Apache daemon group (www-data or apache).
+
+  Passwords are not set. After the first run:
+    sudo passwd $OWNER
+    sudo passwd $ADMIN
+    sudo passwd OPERATOR   # the login that ran this script, or -H NAME
+  Drop SSH keys into each home's .ssh/authorized_keys yourself.
+
+HOW TO RUN IT
+  $PROG [-n] [-lh|--localhost] [-F] [-m devel|test|live] [-u owner] [-a admin] [-H human] [-g group]
+  $PROG -h
+
+  Run as a sudo-capable account. Do not type "sudo $PROG".
+
+FLAGS
+  -n         Dry run. Print the plan with a leading + and change nothing.
+  -lh, --localhost
+             Local dev box only (127.0.0.1). Skips CSF, WireGuard
+             policy, and certbot. Installs dnsmasq (*.devel → 127.0.0.1).
+             Role becomes devel. Apache and MariaDB stay on localhost.
+  -m ROLE    devel (default), test, or live
+  -u owner   Code owner (default: deploy)
+  -a admin   File-admin login (default: www-admin)
+  -H user    Daily operator (default: whoever ran this script)
+  -g group   File group on every tree (default: www-admin)
+  -F         Install/apply CSF. SSH is not world-open: only 10.8.0.0/24
+             (WireGuard) and 192.168.1.0/24 (LAN). UDP 51820 stays open
+             for the tunnel. HTTP 80 on devel; 80+443 on test/live.
+             First enable uses CSF TESTING=1 so a lockout self-reverts.
+  -h         This text
+
+SAFE FIRST RUN
+  laptop: $PROG -n --localhost
+  devel:  $PROG -n -m devel
+  VPS:    $PROG -n -m test     (or -m live)
+
+WHAT IT WILL NOT DO
+  Touch files inside $PLATFORMS/<platform>
+  Enable a catch-all vhost
+  Rewrite an existing WireGuard interface (CSF only adds allow rules)
+  Set or print account passwords
+  Start a container runtime
+EOF
 }
 
-# Intercepts root command execution, logging stdout/stderr streams to the background
+as_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
 run_root() {
   if [ "$DRYRUN" -eq 1 ]; then
-    printf '+'; for a in "$@"; do printf ' %s' "$a"; done; printf '
-'; return 0
+    printf '+'
+    for a in "$@"; do
+      printf ' %s' "$a"
+    done
+    printf '\n'
+    return 0
   fi
-  cmd_summary="$1"
-  [ -n "${2:-}" ] && cmd_summary="$cmd_summary $2"
-  printf "  \\033[33m⏳ Processing:\\033[0m [%s] ...                     \r" "$cmd_summary"
-  
-  echo "Executing Root Command: $*" >> "$LOGFILE"
-  
-  # Temporarily relax 'set -e' to intercept non-zero codes manually without a crash
-  set +e
-  as_root "$@" >> "$LOGFILE" 2>&1
-  cmd_status=$?
-  set -eu # Re-engage absolute error protection
-  
-  if [ $cmd_status -eq 0 ]; then
-    printf "  \\033[32m✓\\033[0m Completed: [%s]                               \n" "$cmd_summary"
-  else
-    printf "  \\033[31m✗\\033[0m Failed (%s): [%s]                             \n" "$cmd_status" "$cmd_summary"
-    return $cmd_status
-  fi
+  as_root "$@"
 }
 
-# Safely verifies binary presence on the system path without returning errors
-have() { 
-  command -v "$1" >/dev/null 2>&1 
+have() {
+  command -v "$1" >/dev/null 2>&1
 }
 
-# Cleans and sanitizes role strings using a safe case pattern match fall-through
 normalize_role() {
   case $1 in
-    devel|localhost|dev)          echo "devel" ;;
-    test|vps-test)               echo "test" ;;
-    live|vps-live|prod|production) echo "live" ;;
-    *)                             echo "" ;;
+    devel|devel|localhost|dev) echo devel ;;
+    test|vps-test) echo test ;;
+    live|vps-live|prod|production) echo live ;;
+    *) echo "" ;;
   esac
 }
 
-# Detects the underlying OS variant and maps the appropriate native package manager
 detect_os() {
-  [ -f /etc/os-release ] && OS_ID=$(. /etc/os-release; echo "${ID:-unknown}")
-  if have apt-get && have dpkg; then PKG=apt
-  elif have apk; then PKG=apk
-  elif have dnf; then PKG=dnf
-  elif have yum; then PKG=yum
-  else PKG=unknown; fi
-}
-
-# Detects the underlying active process system to find the operational init daemon model
-detect_init() {
-  if [ -d /run/systemd/system ] && have systemctl; then INIT=systemd
-  elif [ -d /etc/init.d ] && [ ! -d /run/systemd/system ]; then INIT=sysv
-  elif have rc-service; then INIT=openrc
-  else INIT=unknown; fi
-}
-
-# Probes for the correct web server system daemon user account
-detect_group() {
-  if [ -z "$DAEMON" ]; then
-    if getent passwd www-data >/dev/null 2>&1; then DAEMON=www-data
-    elif getent passwd apache >/dev/null 2>&1; then DAEMON=apache
-    else DAEMON=www-data; fi
+  if [ -f /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    OS_ID=$(. /etc/os-release; echo "${ID:-unknown}")
+  fi
+  if have apt-get && have dpkg; then
+    PKG=apt
+  elif have apk; then
+    PKG=apk
+  elif have dnf; then
+    PKG=dnf
+  elif have yum; then
+    PKG=yum
+  else
+    PKG=unknown
   fi
 }
 
-# Maps standard system control names and live configuration reload blueprints
+detect_init() {
+  if [ -d /run/systemd/system ] && have systemctl; then
+    INIT=systemd
+  elif [ -d /etc/init.d ] && [ ! -d /run/systemd/system ]; then
+    INIT=sysv
+  elif have rc-service; then
+    INIT=openrc
+  elif [ -x /etc/init.d/apache2 ] || [ -x /etc/init.d/httpd ]; then
+    INIT=sysv
+  elif have systemctl; then
+    INIT=systemd
+  else
+    INIT=unknown
+  fi
+}
+
+detect_group() {
+  if [ -z "$DAEMON" ]; then
+    if getent passwd www-data >/dev/null 2>&1; then
+      DAEMON=www-data
+    elif getent passwd apache >/dev/null 2>&1; then
+      DAEMON=apache
+    else
+      DAEMON=www-data
+    fi
+  fi
+  if [ -z "$GROUP" ]; then
+    GROUP=www-admin
+  fi
+}
+
 detect_services() {
-  if [ -x /etc/init.d/apache2 ] || [ -d /etc/apache2 ]; then SVC_APACHE=apache2
-  else SVC_APACHE=httpd; fi
-  
-  if [ -x /etc/init.d/mysql ] || have mysql; then SVC_DB=mysql
-  else SVC_DB=mariadb; fi
-  
+  SVC_APACHE=""
+  SVC_DB=""
+  if [ -x /etc/init.d/apache2 ] || [ -d /etc/apache2 ]; then
+    SVC_APACHE=apache2
+  elif [ -x /etc/init.d/httpd ] || [ -d /etc/httpd ]; then
+    SVC_APACHE=httpd
+  else
+    SVC_APACHE=apache2
+  fi
+  if [ -x /etc/init.d/mysql ] || have mysql; then
+    SVC_DB=mysql
+  elif [ -x /etc/init.d/mariadb ]; then
+    SVC_DB=mariadb
+  else
+    SVC_DB=mysql
+  fi
+
   case $INIT in
-    systemd) RELOAD_APACHE="systemctl reload $SVC_APACHE" ;;
-    *)       RELOAD_APACHE="/etc/init.d/$SVC_APACHE reload" ;;
+    systemd)
+      RELOAD_APACHE="systemctl reload $SVC_APACHE"
+      ;;
+    openrc)
+      RELOAD_APACHE="rc-service $SVC_APACHE reload"
+      ;;
+    sysv|unknown)
+      RELOAD_APACHE="/etc/init.d/$SVC_APACHE reload"
+      ;;
   esac
 }
 
-# Queries package tracking indexes idempotently to check if software is already active
 pkg_ok() {
   case $PKG in
-    apt) dpkg-query -W -f='\${Status}' "$1" 2>/dev/null | grep -q 'install ok installed' ;;
-    *)   return 1 ;;
+    apt)
+      dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'
+      ;;
+    apk)
+      apk info -e "$1" >/dev/null 2>&1
+      ;;
+    dnf|yum)
+      rpm -q "$1" >/dev/null 2>&1
+      ;;
+    *)
+      return 1
+      ;;
   esac
 }
 
-# Interfaces with native package backends securely
 pkg_install() {
   case $PKG in
-    apt) run_root apt-get update && run_root apt-get install -y "$@" ;;
-    *)   return 1 ;;
+    apt)
+      run_root apt-get update
+      run_root apt-get install -y "$@"
+      ;;
+    apk)
+      run_root apk add --no-cache "$@"
+      ;;
+    dnf)
+      run_root dnf install -y "$@"
+      ;;
+    yum)
+      run_root yum install -y "$@"
+      ;;
+    *)
+      echo "$PROG: no package manager detected; install Apache PHP MariaDB git sudo by hand" >&2
+      return 1
+      ;;
   esac
 }
 
-# Boots background daemons securely based on the active init architecture mapped
 svc_start() {
   name=$1
   case $INIT in
-    systemd) run_root systemctl enable "$name" 2>/dev/null || true; run_root systemctl start "$name" || true ;;
-    *)       [ -x "/etc/init.d/$name" ] && run_root "/etc/init.d/$name" start || true ;;
+    systemd)
+      run_root systemctl enable "$name" 2>/dev/null || true
+      run_root systemctl start "$name" || true
+      ;;
+    openrc)
+      run_root rc-update add "$name" default 2>/dev/null || true
+      run_root rc-service "$name" start || true
+      ;;
+    sysv|unknown)
+      if [ -x "/etc/init.d/$name" ]; then
+        run_root "/etc/init.d/$name" start || true
+      fi
+      ;;
   esac
 }
 
-# Deploys safe file overlays using a secure temporary buffer file swap pattern
+pkg_list_for() {
+  case $PKG in
+    apt)
+      echo "sudo apache2 mariadb-server git curl unzip rsync ca-certificates acl"
+      echo "php php-cli php-mysql php-xml php-gd php-mbstring php-curl php-zip php-fpm"
+      echo "php-intl php-bcmath php-imagick php-apcu"
+      echo "libapache2-mod-php apache2-utils"
+      echo "mariadb-backup msmtp-mta unattended-upgrades needrestart"
+      echo "logwatch goaccess etckeeper smartmontools irqbalance haveged"
+      echo "moreutils jq pv age"
+      if [ "$LOCALHOST" -eq 1 ] || [ "$ROLE" = devel ]; then
+        echo "dnsmasq"
+      fi
+      if [ "$LOCALHOST" -eq 0 ] && { [ "$ROLE" = test ] || [ "$ROLE" = live ]; }; then
+        echo "certbot python3-certbot-apache"
+      fi
+      if [ "$LOCALHOST" -eq 0 ] && [ "$DO_CSF" -eq 1 ]; then
+        echo "iptables perl libwww-perl liblwp-protocol-https-perl libgd-perl"
+      fi
+      ;;
+    apk)
+      echo "sudo apache2 mariadb mariadb-client git curl unzip rsync acl"
+      echo "php php-cli php-mysqli php-xml php-gd php-mbstring php-curl php-zip apache2-proxy"
+      echo "php-intl php-bcmath imagemagick jq rsync smartmontools haveged"
+      if [ "$LOCALHOST" -eq 1 ] || [ "$ROLE" = devel ]; then
+        echo "dnsmasq"
+      fi
+      ;;
+    dnf|yum)
+      echo "sudo httpd mariadb-server git curl unzip rsync ca-certificates acl"
+      echo "php php-cli php-mysqlnd php-xml php-gd php-mbstring php-json php-intl php-bcmath"
+      echo "httpd-tools mariadb-backup jq pv smartmontools irqbalance"
+      if [ "$LOCALHOST" -eq 1 ] || [ "$ROLE" = devel ]; then
+        echo "dnsmasq"
+      fi
+      if [ "$LOCALHOST" -eq 0 ] && { [ "$ROLE" = test ] || [ "$ROLE" = live ]; }; then
+        echo "certbot python3-certbot-apache"
+      fi
+      ;;
+  esac
+}
+
+find_admin_bin() {
+  # groupadd/useradd live in /usr/sbin; unprivileged PATH often omits it.
+  name=$1
+  if command -v "$name" >/dev/null 2>&1; then
+    command -v "$name"
+    return 0
+  fi
+  for d in /usr/sbin /sbin /usr/bin /bin; do
+    [ -x "$d/$name" ] && { echo "$d/$name"; return 0; }
+  done
+  return 1
+}
+
+ensure_group() {
+  g=$1
+  if getent group "$g" >/dev/null 2>&1; then
+    echo "group ok: $g"
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ groupadd $g"
+    return 0
+  fi
+  bin=$(find_admin_bin groupadd || true)
+  if [ -n "$bin" ]; then
+    run_root "$bin" "$g"
+    return $?
+  fi
+  bin=$(find_admin_bin addgroup || true)
+  if [ -n "$bin" ]; then
+    run_root "$bin" "$g"
+    return $?
+  fi
+  echo "$PROG: cannot create group $g (no groupadd/addgroup in PATH or /usr/sbin)" >&2
+  echo "$PROG: install passwd, or: sudo groupadd $g" >&2
+  return 1
+}
+
+ensure_user() {
+  # ensure_user NAME COMMENT
+  name=$1
+  comment=$2
+  if id "$name" >/dev/null 2>&1; then
+    echo "user ok: $name"
+  else
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ useradd -m -s /bin/bash -c '$comment' -G $GROUP $name"
+    elif have adduser && [ "$PKG" = apt ]; then
+      run_root adduser --disabled-password --gecos "$comment" --ingroup "$GROUP" "$name"
+    elif have useradd; then
+      run_root useradd -m -s /bin/bash -c "$comment" -G "$GROUP" "$name"
+    elif have adduser; then
+      run_root adduser -D -s /bin/ash -G "$GROUP" "$name"
+    else
+      echo "$PROG: cannot create user $name" >&2
+      return 1
+    fi
+  fi
+
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ usermod -aG $GROUP $name"
+    return 0
+  fi
+
+  if have usermod; then
+    run_root usermod -aG "$GROUP" "$name" 2>/dev/null || true
+  elif have adduser; then
+    run_root adduser "$name" "$GROUP" 2>/dev/null || true
+  fi
+
+  home=$(getent passwd "$name" 2>/dev/null | cut -d: -f6)
+  if [ -z "$home" ]; then
+    home=/home/$name
+  fi
+  run_root mkdir -p "$home/.ssh"
+  run_root chmod 0700 "$home/.ssh"
+  run_root chown -R "$name:$name" "$home/.ssh"
+  if [ ! -f "$home/.ssh/authorized_keys" ]; then
+    if [ "$DRYRUN" -eq 0 ]; then
+      as_root touch "$home/.ssh/authorized_keys"
+      as_root chmod 0600 "$home/.ssh/authorized_keys"
+      as_root chown "$name:$name" "$home/.ssh/authorized_keys"
+    else
+      echo "+ touch $home/.ssh/authorized_keys"
+    fi
+  fi
+}
+
+write_sudoers() {
+  dest=$1
+  body=$2
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $dest"
+    printf '%s\n' "$body" | sed 's/^/+ /'
+    return 0
+  fi
+  tmp=$(mktemp)
+  printf '%s\n' "$body" > "$tmp"
+  as_root install -m 0440 "$tmp" "$dest"
+  rm -f "$tmp"
+  if have visudo; then
+    as_root visudo -cf "$dest" >/dev/null 2>&1 || {
+      echo "$PROG: $dest failed visudo; removing" >&2
+      as_root rm -f "$dest"
+      return 1
+    }
+  fi
+  echo "sudoers: $dest"
+}
+
+user_conf() {
+  name=$1
+  home=$(getent passwd "$name" 2>/dev/null | cut -d: -f6)
+  if [ -z "$home" ]; then
+    home=/home/$name
+  fi
+  dest=$home/.stardust.conf
+  if [ -f "$dest" ]; then
+    echo "conf exists: $dest (not overwritten)"
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $dest"
+    return 0
+  fi
+  as_root sh -c "cat > '$dest'" <<EOF
+# Stardust config — generated by $PROG
+# role=$ROLE host=$HOSTN os=$OS_ID pkg=$PKG init=$INIT user=$name
+
+STARDUST_ROLE=$ROLE
+STARDUST_ROOT=$STARDUST
+PLATFORMS=$PLATFORMS
+OWNER=$OWNER
+ADMIN=$ADMIN
+HUMAN=$HUMAN
+DAEMON=$DAEMON
+GROUP=$GROUP
+DIR_MODE=0770
+BEE=$(command -v bee 2>/dev/null || echo $BEE_BIN)
+APACHE_SERVICE=$SVC_APACHE
+DB_SERVICE=$SVC_DB
+APACHE_RELOAD="$RELOAD_APACHE"
+DB_HOST=127.0.0.1
+DB_PREFIX=bd_
+EOF
+  as_root chown "$name:$name" "$dest"
+  as_root chmod 0600 "$dest"
+  echo "wrote $dest"
+}
+
+install_tool() {
+  src=$1
+  dest=$2
+  mode=${3:-0755}
+  if [ ! -f "$src" ]; then
+    echo "note: skip $dest (no $src next to installer)"
+    return 0
+  fi
+  run_root install -m "$mode" "$src" "$dest"
+  echo "installed $dest"
+}
+
 write_dropin() {
   dest=$1
-  [ "$DRYRUN" -eq 1 ] && echo "+ write $dest" && return 0
-  as_root mkdir -p "$(dirname "$dest")"
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $dest"
+    return 0
+  fi
+  dir=$(dirname "$dest")
+  as_root mkdir -p "$dir"
   tmp=$(mktemp)
   cat > "$tmp"
   as_root install -m 0644 "$tmp" "$dest"
   rm -f "$tmp"
+  echo "wrote $dest"
 }
 
-# Idempotent helper: Only writes a configuration drop-in file if it does not exist
 write_if_absent() {
-  [ -e "$1" ] || write_dropin "$1"
+  dest=$1
+  if [ -e "$dest" ]; then
+    echo "exists: $dest (unchanged)"
+    return 0
+  fi
+  write_dropin "$dest"
 }
 
-# Establishes the initial root environment configuration matrix layout
-write_etc_conf() {
-  dest=/etc/stardust.conf
-  [ -f "$dest" ] && return 0
-  [ "$DRYRUN" -eq 1 ] && return 0
-  # Note: The 'EOF' delimiter is single-quoted to lock variables inside literal text strings
-  as_root sh -c "cat > '$dest'" << 'EOF'
-STARDUST_ROLE=$ROLE
-STARDUST_ROOT=$STARDUST
+ship_tools() {
+  install_tool "$BINDIR/crdir" /usr/local/bin/crdir 0755
+  install_tool "$BINDIR/newfeature" /usr/local/bin/newfeature 0755
+  install_tool "$BINDIR/d7-migrate" /usr/local/bin/d7-migrate 0755
+  install_tool "$BINDIR/stardust" /usr/local/bin/stardust 0755
+  install_tool "$BINDIR/stardust-priv" /usr/local/sbin/stardust-priv 0750
+  install_tool "$BINDIR/stardust-menu" /usr/local/bin/stardust-menu 0755
+  if [ -x "$TUIDIR/stardust-tui" ]; then
+    install_tool "$TUIDIR/stardust-tui" /usr/local/bin/stardust-tui 0755
+  elif [ -d "$TUIDIR" ] && [ -f "$TUIDIR/main.go" ] && command -v go >/dev/null 2>&1; then
+    echo "building stardust-tui"
+    (cd "$TUIDIR" && GOPROXY=https://proxy.golang.org,direct go build -o stardust-tui .) && \
+      install_tool "$TUIDIR/stardust-tui" /usr/local/bin/stardust-tui 0755
+  else
+    echo "stardust-tui binary absent (optional; use stardust-menu)"
+  fi
+  if [ -f "$HERE/install-stardust.sh" ]; then
+    install_tool "$HERE/install-stardust.sh" /usr/local/sbin/install-stardust.sh 0755
+    run_root ln -sfn /usr/local/sbin/install-stardust.sh /usr/local/sbin/stardust-install.sh
+  else
+    install_tool "$HERE/stardust-install.sh" /usr/local/sbin/stardust-install.sh 0755
+  fi
+  if [ -d "$LIBSRC" ]; then
+    run_root mkdir -p /usr/local/lib/stardust "$STARDUST/lib"
+    for f in "$LIBSRC"/*.sh "$LIBSRC"/d7-catalog.txt; do
+      [ -f "$f" ] || continue
+      # apps/bee/lib.sh is the real bee runtime; skip the checkout shim
+      if [ "$(basename "$f")" = bee.sh ] && [ -f "$HERE/apps/bee/lib.sh" ]; then
+        continue
+      fi
+      run_root install -m 0644 "$f" "/usr/local/lib/stardust/$(basename "$f")"
+      run_root install -m 0644 "$f" "$STARDUST/lib/$(basename "$f")"
+    done
+    echo "installed stardust-lib from $LIBSRC"
+    if [ -f "$HERE/apps/bee/lib.sh" ]; then
+      run_root install -m 0644 "$HERE/apps/bee/lib.sh" /usr/local/lib/stardust/bee.sh
+      run_root install -m 0644 "$HERE/apps/bee/lib.sh" "$STARDUST/lib/bee.sh"
+      echo "installed apps/bee/lib.sh as bee.sh"
+    fi
+  fi
+  if [ -f "$MANDIR/crdir.1" ]; then
+    run_root mkdir -p /usr/local/share/man/man1
+    run_root install -m 0644 "$MANDIR/crdir.1" /usr/local/share/man/man1/crdir.1
+    echo "installed man crdir"
+  fi
+  if [ -f "$MANDIR/stardust.1" ]; then
+    run_root mkdir -p /usr/local/share/man/man1
+    run_root install -m 0644 "$MANDIR/stardust.1" /usr/local/share/man/man1/stardust.1
+    echo "installed man stardust"
+  fi
+  if [ -f "$MANDIR/d7-migrate.1" ]; then
+    run_root mkdir -p /usr/local/share/man/man1
+    run_root install -m 0644 "$MANDIR/d7-migrate.1" /usr/local/share/man/man1/d7-migrate.1
+    echo "installed man d7-migrate"
+  fi
+  DOCSRC=""
+  [ -d "$HERE/docs" ] && DOCSRC=$HERE/docs
+  if [ -n "$DOCSRC" ]; then
+    run_root mkdir -p /usr/local/share/stardust/docs "$STARDUST/docs"
+    for f in "$DOCSRC"/*.txt "$DOCSRC"/*.md; do
+      [ -f "$f" ] || continue
+      run_root install -m 0644 "$f" "/usr/local/share/stardust/docs/$(basename "$f")"
+      run_root install -m 0644 "$f" "$STARDUST/docs/$(basename "$f")"
+    done
+    echo "installed docs from $DOCSRC"
+  fi
+  if [ -x /usr/local/bin/stardust ]; then
+    run_root ln -sfn /usr/local/bin/stardust "$STARDUST/bin/stardust"
+  fi
+}
+
+tune_php_fpm() {
+  # One pool as www-data. Event MPM. Do not create per-product pools.
+  pool=""
+  for d in /etc/php/*/fpm/pool.d; do
+    [ -d "$d" ] || continue
+    pool=$d/stardust.conf
+    break
+  done
+  if [ -z "$pool" ]; then
+    echo "note: no php-fpm pool.d — skip FPM"
+    return 0
+  fi
+  body="; Stardust — single pool, user $DAEMON
+[stardust]
+user = $DAEMON
+group = $GROUP
+listen = /run/php/stardust-fpm.sock
+listen.owner = $DAEMON
+listen.group = $DAEMON
+pm = ondemand
+pm.max_children = 20
+pm.process_idle_timeout = 10s
+"
+  printf '%s\n' "$body" | write_dropin "$pool"
+  if have a2enmod; then
+    run_root a2dismod mpm_prefork >/dev/null 2>&1 || true
+    run_root a2enmod mpm_event >/dev/null 2>&1 || true
+    run_root a2enmod proxy_fcgi setenvif >/dev/null 2>&1 || true
+  fi
+  echo "php-fpm pool $pool (Event MPM). Confirm sites use SetHandler proxy:unix:/run/php/stardust-fpm.sock|fcgi://localhost/"
+}
+
+tune_extras() {
+  # Security updates only; never reboot this host from apt.
+  if [ -d /etc/apt/apt.conf.d ]; then
+    printf '%s\n' \
+      'Unattended-Upgrade::Automatic-Reboot "false";' \
+      'Unattended-Upgrade::Mail "";' \
+      | write_dropin /etc/apt/apt.conf.d/52stardust-unattended
+  fi
+  if have etckeeper && [ ! -d /etc/.git ]; then
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ etckeeper init"
+    else
+      as_root etckeeper init 2>/dev/null || true
+      echo "etckeeper: /etc is a git repo"
+    fi
+  fi
+  for s in haveged irqbalance smartd smartmontools; do
+    [ -x "/etc/init.d/$s" ] || continue
+    svc_start "$s"
+  done
+  if have msmtp || have msmtp-mta; then
+    echo "note: copy /etc/msmtprc for NOTIFY= mail (msmtp-mta is installed)"
+  fi
+  echo "extras: apache2-utils php-intl/bcmath/imagick/apcu mariadb-backup logwatch goaccess age jq pv"
+}
+
+tune_php() {
+  # Shared limits on every SAPI. Hardening and live OPcache only on FPM/apache2.
+  # CLI must keep exec/passthru so Bee, cron, and site-check work.
+  shared="; Stardust PHP — shared (8-core / 32G and small VPS)
+memory_limit = 256M
+upload_max_filesize = 64M
+post_max_size = 64M
+max_execution_time = 120
+max_input_vars = 3000
+date.timezone = UTC
+allow_url_include = Off
+expose_php = Off
+opcache.enable = 1
+opcache.memory_consumption = 256
+opcache.max_accelerated_files = 16000
+opcache.interned_strings_buffer = 16
+"
+  if [ "$ROLE" = live ] || [ "$ROLE" = test ]; then
+    opc_web="opcache.validate_timestamps = 0
+opcache.revalidate_freq = 0
+"
+  else
+    opc_web="opcache.validate_timestamps = 1
+opcache.revalidate_freq = 2
+"
+  fi
+  web="; Stardust PHP — FPM / apache2 only (not CLI)
+disable_functions = passthru,popen,proc_open,proc_close,dl,pcntl_exec,pcntl_fork
+allow_url_fopen = On
+session.cookie_httponly = 1
+session.use_strict_mode = 1
+$opc_web"
+  if [ "$ROLE" = live ] || [ "$ROLE" = test ]; then
+    web="${web}session.cookie_secure = 1
+"
+  fi
+  cli="; Stardust PHP — CLI only
+; do not set disable_functions here — Bee needs the process functions
+opcache.enable_cli = 0
+opcache.validate_timestamps = 1
+"
+  written=0
+  if [ -d /etc/php ]; then
+    for d in /etc/php/*/apache2/conf.d /etc/php/*/cli/conf.d /etc/php/*/fpm/conf.d; do
+      [ -d "$d" ] || continue
+      printf '%s\n' "$shared" | write_dropin "$d/30-stardust.ini"
+      case $d in
+        */cli/conf.d)
+          printf '%s\n' "$cli" | write_dropin "$d/35-stardust-cli.ini"
+          ;;
+        *)
+          printf '%s\n' "$web" | write_dropin "$d/35-stardust-harden.ini"
+          ;;
+      esac
+      written=1
+    done
+  fi
+  if [ "$written" -eq 0 ] && [ -d /etc/php.d ]; then
+    printf '%s\n' "$shared" | write_dropin /etc/php.d/30-stardust.ini
+    written=1
+    echo "note: single /etc/php.d — FPM harden not split; check php --ini"
+  fi
+  if [ "$written" -eq 0 ]; then
+    echo "note: no PHP conf.d found; set memory_limit by hand"
+  else
+    echo "PHP: shared 30-stardust.ini; FPM/apache harden 35-stardust-harden.ini; CLI 35-stardust-cli.ini"
+  fi
+}
+
+tune_vps() {
+  # Public VPS (test/live). Skip laptop and devel workstations.
+  # ip_forward stays 1 — WireGuard needs it. Do not disable IPv6 here.
+  if [ "$LOCALHOST" -eq 1 ] || [ "$ROLE" = devel ]; then
+    echo "VPS harden skipped (localhost/devel)"
+    return 0
+  fi
+  sysctl_body="# Stardust VPS — do not set ip_forward=0 (WireGuard)
+vm.swappiness = 10
+vm.dirty_ratio = 20
+vm.dirty_background_ratio = 5
+net.core.somaxconn = 1024
+net.core.netdev_max_backlog = 2048
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.ip_forward = 1
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+fs.suid_dumpable = 0
+kernel.randomize_va_space = 2
+"
+  if grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+    sysctl_body="${sysctl_body}net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+"
+  fi
+  printf '%s\n' "$sysctl_body" | write_dropin /etc/sysctl.d/60-stardust.conf
+  if [ "$DRYRUN" -eq 0 ] && have sysctl; then
+    as_root sysctl --system >/dev/null 2>&1 || as_root sysctl -p /etc/sysctl.d/60-stardust.conf >/dev/null 2>&1 || true
+  fi
+  printf '%s\n' \
+    "www-data soft nofile 65535" \
+    "www-data hard nofile 65535" \
+    "deploy soft nofile 65535" \
+    "deploy hard nofile 65535" \
+    | write_dropin /etc/security/limits.d/stardust.conf
+  apache_h="# Stardust VPS Apache
+ServerTokens Prod
+ServerSignature Off
+TraceEnable Off
+Timeout 30
+KeepAlive On
+KeepAliveTimeout 5
+MaxKeepAliveRequests 100
+"
+  if [ -d /etc/apache2/conf-available ]; then
+    printf '%s\n' "$apache_h" | write_dropin /etc/apache2/conf-available/stardust-harden.conf
+    if have a2enconf; then
+      run_root a2enconf stardust-harden >/dev/null 2>&1 || true
+    fi
+  fi
+  echo "VPS harden: sysctl 60-stardust, limits, Apache tokens/timeouts"
+  echo "note: provider disk snapshots are not a CMS backup — keep backup-all + offsite"
+}
+
+tune_mysql() {
+  body="# Stardust MariaDB — bind local, modest buffer
+[mysqld]
+bind-address = 127.0.0.1
+skip-networking = 0
+innodb_buffer_pool_size = 2G
+innodb_log_file_size = 256M
+# root stays unix_socket (Debian default). Do not SET PASSWORD for root.
+innodb_flush_log_at_trx_commit = 2
+max_connections = 80
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+"
+  if [ -d /etc/mysql/mariadb.conf.d ]; then
+    printf '%s\n' "$body" | write_dropin /etc/mysql/mariadb.conf.d/90-stardust.cnf
+  elif [ -d /etc/mysql/conf.d ]; then
+    printf '%s\n' "$body" | write_dropin /etc/mysql/conf.d/90-stardust.cnf
+  elif [ -d /etc/my.cnf.d ]; then
+    printf '%s\n' "$body" | write_dropin /etc/my.cnf.d/90-stardust.cnf
+  else
+    echo "note: no MariaDB conf.d; set bind-address = 127.0.0.1 by hand"
+  fi
+}
+
+tune_logrotate() {
+  body="$STARDUST/state/tasks.log
+$STARDUST/state/backup-all.log
+$STARDUST/state/cron-all.log
+$STARDUST/backups/*/*/*/*.log
+/var/log/apache2/*.log
+{
+  weekly
+  rotate 8
+  missingok
+  notifempty
+  compress
+  sharedscripts
+  postrotate
+    if [ -x /etc/init.d/$SVC_APACHE ]; then /etc/init.d/$SVC_APACHE reload >/dev/null 2>&1 || true; fi
+  endscript
+}
+"
+  if [ -d /etc/logrotate.d ]; then
+    printf '%s\n' "$body" | write_dropin /etc/logrotate.d/stardust
+  fi
+}
+
+write_cron() {
+  dest=/etc/cron.d/stardust
+  body="# Stardust — nightly backup + per-site Bee cron
+# m h dom mon dow user command
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+15 3 * * * $OWNER /usr/local/bin/stardust backup-all >/srv/stardust/state/backup-all.log 2>&1
+7,22,37,52 * * * * $OWNER /usr/local/bin/stardust cron-all >/srv/stardust/state/cron-all.log 2>&1
+"
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $dest"
+    return 0
+  fi
+  printf '%s\n' "$body" | write_dropin "$dest"
+  as_root chmod 0644 "$dest" 2>/dev/null || true
+  echo "cron $dest (backup 03:15, bee cron :07/:22/:37/:52)"
+}
+
+write_state() {
+  dest=$STARDUST/state/state.json
+  if [ -f "$dest" ]; then
+    echo "state exists: $dest"
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $dest"
+    return 0
+  fi
+  as_root sh -c "cat > '$dest'" <<EOF
+{"role":"$ROLE","platforms":[]}
 EOF
+  as_root chown "$OWNER:$GROUP" "$dest"
+  as_root chmod 0660 "$dest"
+  echo "wrote $dest"
 }
 
-# Fully interactive keyboard reader prompt engine
+# First-run for packaged extras. Skip when that app already has a config.
+bootstrap_deps() {
+  echo "bootstrap extras (skip when config already exists)"
+
+  if have php-fpm || [ -x /etc/init.d/php-fpm ] || ls /etc/init.d/php*-fpm >/dev/null 2>&1; then
+    for s in php8.2-fpm php8.3-fpm php8.4-fpm php7.4-fpm php-fpm; do
+      if [ -x "/etc/init.d/$s" ] || [ -d "/lib/systemd/system/$s.service" ]; then
+        svc_start "$s"
+        break
+      fi
+    done
+  fi
+
+  if have mysql || have mariadb; then
+    if [ "$DRYRUN" -eq 0 ]; then
+      if mysql -N -e "SELECT 1" >/dev/null 2>&1; then
+        echo "mariadb: local socket OK"
+      else
+        echo "note: mariadb not answering on the unix socket yet — start it, then re-run"
+      fi
+    fi
+  fi
+
+  if have etckeeper; then
+    if [ -d /etc/.git ]; then
+      echo "etckeeper: /etc already a repo (unchanged)"
+    elif [ "$DRYRUN" -eq 1 ]; then
+      echo "+ etckeeper init"
+    else
+      as_root etckeeper init >/dev/null 2>&1 || true
+      as_root etckeeper commit -m "stardust first run" >/dev/null 2>&1 || true
+      echo "etckeeper: initialized /etc"
+    fi
+  fi
+
+  if have needrestart && [ -d /etc/needrestart/conf.d ]; then
+    printf '%s\n' '$nrconf{restart} = "l";' \
+      | write_if_absent /etc/needrestart/conf.d/stardust.conf
+  fi
+
+  if have logwatch; then
+    printf '%s\n' "Detail = Low" "MailTo = root" \
+      | write_if_absent /etc/logwatch/conf/logwatch.conf
+  fi
+
+  if have goaccess && [ ! -f /etc/goaccess/goaccess.conf ]; then
+    echo "note: goaccess installed — run: goaccess /var/log/apache2/access.log"
+  fi
+
+  if have smartd || [ -x /etc/init.d/smartd ] || [ -x /etc/init.d/smartmontools ]; then
+    svc_start smartd 2>/dev/null || svc_start smartmontools 2>/dev/null || true
+  fi
+  if have irqbalance || [ -x /etc/init.d/irqbalance ]; then
+    svc_start irqbalance
+  fi
+  if have haveged || [ -x /etc/init.d/haveged ]; then
+    svc_start haveged
+  fi
+
+  age_key=$STARDUST/state/secrets/age.key
+  if have age-keygen; then
+    if [ -f "$age_key" ]; then
+      echo "age: $age_key exists (unchanged)"
+    elif [ "$DRYRUN" -eq 1 ]; then
+      echo "+ age-keygen -o $age_key"
+    else
+      as_root mkdir -p "$STARDUST/state/secrets"
+      as_root age-keygen -o "$age_key" >/dev/null
+      as_root chown "$OWNER:stardust" "$age_key"
+      as_root chmod 0640 "$age_key"
+      echo "age: wrote $age_key"
+    fi
+  fi
+
+  if have msmtp || have msmtp-mta; then
+    if [ -f /etc/msmtprc ]; then
+      echo "msmtp: /etc/msmtprc exists (unchanged)"
+    else
+      printf '%s\n' \
+        "# Stardust msmtp — fill host/user/password, then: chmod 0640 /etc/msmtprc" \
+        "defaults" \
+        "auth           on" \
+        "tls            on" \
+        "tls_starttls   on" \
+        "logfile        /var/log/msmtp.log" \
+        "account        default" \
+        "host           mail.example" \
+        "port           587" \
+        "from           stardust@example" \
+        "user           stardust@example" \
+        "password       CHANGE-ME" \
+        | write_if_absent /etc/msmtprc.example
+      if [ "$DRYRUN" -eq 0 ] && [ -t 0 ]; then
+        nmail=$(install_prompt "NOTIFY email — where backup/fail mail goes (empty skip)" "" \
+          "Stardust can mail after backup-all or a failed site-check.
+This only sets NOTIFY= in /etc/stardust.conf.
+You still copy /etc/msmtprc.example to /etc/msmtprc and put real SMTP there.")
+        if [ -n "$nmail" ] && [ -f /etc/stardust.conf ]; then
+          if grep -q '^NOTIFY=' /etc/stardust.conf; then
+            as_root sed -i "s|^NOTIFY=.*|NOTIFY=$nmail|" /etc/stardust.conf
+          else
+            as_root sh -c "printf 'NOTIFY=%s\\n' '$nmail' >> /etc/stardust.conf"
+          fi
+          echo "NOTIFY=$nmail — copy /etc/msmtprc.example to /etc/msmtprc and edit SMTP"
+        fi
+      else
+        echo "msmtp: wrote /etc/msmtprc.example (not live until you copy it)"
+      fi
+    fi
+  fi
+
+  if have git && [ "$DRYRUN" -eq 0 ]; then
+    as_root git config --system --get safe.directory "$PLATFORMS" >/dev/null 2>&1 \
+      || as_root git config --system --add safe.directory "$PLATFORMS" || true
+    as_root -u "$OWNER" git config --global init.defaultBranch devel 2>/dev/null || true
+  fi
+
+  if [ "$LOCALHOST" -eq 0 ] && { [ "$ROLE" = test ] || [ "$ROLE" = live ]; }; then
+    if have certbot; then
+      echo "certbot: installed — obtain certs after site-add, not during install"
+    fi
+  fi
+}
+
 install_prompt() {
-  q=$1; def=${2:-}; help=${3:-}
+  q=$1
+  def=${2:-}
+  help=${3:-}
   while :; do
-    printf '%s\n> [%s]: ' "$q" "$def" >&2
+    if [ -n "$help" ]; then
+      printf '%s  (? help)\n' "$q" >&2
+    else
+      printf '%s\n' "$q" >&2
+    fi
+    if [ -n "$def" ]; then
+      printf '> [%s]: ' "$def" >&2
+    else
+      printf '> ' >&2
+    fi
     IFS= read -r ans || ans=
+    case $ans in
+      \?|help|HELP)
+        printf '\n%s\n\n' "$help"
+        printf 'Enter to return to the question... ' >&2
+        IFS= read -r _ || true
+        continue
+        ;;
+    esac
     [ -n "$ans" ] || ans=$def
     printf '%s\n' "$ans"
     return 0
   done
 }
 
-# Stubs required for legacy script asset dependencies
-gitea_conf_path() { return 1; }
-gitea_installed() { return 1; }
-maybe_gitea_defaults() { return 0; }
-write_sudoers() { :; }
+gitea_conf_path() {
+  for f in \
+    /etc/gitea/app.ini \
+    /var/lib/gitea/custom/conf/app.ini \
+    /etc/gitea/conf/app.ini \
+    /home/git/gitea/custom/conf/app.ini
+  do
+    if [ -f "$f" ]; then
+      printf '%s\n' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
 
-# ------------------------------------------------------------------------------
-# 5. FIXED CLI FLAG SIFTER (The Command-Line Interface Input Loop)
-# ------------------------------------------------------------------------------
-# Handles argument parsing processing blocks step-by-step.
-# Uses 'shift' to constantly pop the current checked option off the execution list.
-while [ $# -gt 0 ]; do
-  case $1 in
-    -n) 
-      DRYRUN=1 
-      ;;
-    -lh|--localhost) 
+gitea_installed() {
+  have gitea && return 0
+  [ -x /usr/local/bin/gitea ] && return 0
+  [ -x /usr/bin/gitea ] && return 0
+  gitea_conf_path >/dev/null && return 0
+  return 1
+}
+
+stardust_git_configured() {
+  for f in "$HOME/.stardust.conf" /etc/stardust.conf; do
+    [ -f "$f" ] || continue
+    val=$(sed -n 's/^STARDUST_GIT_TEMPLATE=//p' "$f" | tail -n 1)
+    case $val in
+      ''|*YOURORG*|*git.example*) ;;
+      *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Devel/localhost only. Never rewrite Gitea app.ini.
+# Fresh box + Gitea present → prompt once. Existing Stardust git template → skip.
+maybe_gitea_defaults() {
+  if [ "$LOCALHOST" -ne 1 ] && [ "$ROLE" != devel ]; then
+    return 0
+  fi
+  if stardust_git_configured; then
+    echo "git template already set — skip Gitea/Stardust git prompts"
+    return 0
+  fi
+  if ! gitea_installed; then
+    echo "Gitea not found on this host — skip git template (set STARDUST_GIT_TEMPLATE later)"
+    return 0
+  fi
+  gc=$(gitea_conf_path || true)
+  echo "Gitea present${gc:+ ($gc)}"
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ prompt STARDUST_GIT_TEMPLATE (Gitea seen, no existing Stardust git config)"
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    echo "no TTY — not prompting for git template"
+    return 0
+  fi
+  host_def=gitea-starhq
+  if [ -f "$HOME/.ssh/config" ]; then
+    h=$(awk 'tolower($1)=="host" && $2 !~ /[*?]/ {
+      if ($2 ~ /gitea|github|gitlab|git/) { print $2; exit }
+    }' "$HOME/.ssh/config" 2>/dev/null || true)
+    [ -n "$h" ] && host_def=$h
+  fi
+  host=$(install_prompt "Git SSH host — name in git@HOST:org/repo.git" "$host_def" \
+    "Accept the scanned default. This is usually a Host line in ~/.ssh/config.
+Empty host skips git template. Type ? here for this text again.")
+  owner=$(install_prompt "Git owner/org — first path after the colon" "" \
+    "On Gitea this is the organization or your username.
+Template becomes git@HOST:OWNER/%s.git  (%s = platform name).")
+  if [ -z "$owner" ]; then
+    echo "no owner — leave STARDUST_GIT_TEMPLATE empty"
+    return 0
+  fi
+  tpl="git@${host}:${owner}/%s.git"
+  dest=/etc/stardust.conf
+  if [ -f "$dest" ] && grep -q '^STARDUST_GIT_TEMPLATE=' "$dest"; then
+    as_root sed -i "s|^STARDUST_GIT_TEMPLATE=.*|STARDUST_GIT_TEMPLATE=$tpl|" "$dest"
+  elif [ -f "$dest" ]; then
+    as_root sh -c "printf 'STARDUST_GIT_TEMPLATE=%s\\n' '$tpl' >> '$dest'"
+  fi
+  echo "wrote STARDUST_GIT_TEMPLATE=$tpl"
+  echo "Gitea app.ini was not changed (already installed)"
+}
+
+write_etc_conf() {
+  dest=/etc/stardust.conf
+  if [ -f "$dest" ]; then
+    echo "conf exists: $dest (not overwritten)"
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $dest"
+    return 0
+  fi
+  as_root sh -c "cat > '$dest'" <<EOF
+# System-wide Stardust defaults (per-user ~/.stardust.conf overrides)
+STARDUST_ROLE=$ROLE
+STARDUST_ROOT=$STARDUST
+PLATFORMS=$PLATFORMS
+OWNER=$OWNER
+ADMIN=$ADMIN
+HUMAN=$HUMAN
+DAEMON=$DAEMON
+GROUP=$GROUP
+DIR_MODE=0770
+BEE=$BEE_BIN
+APACHE_SERVICE=$SVC_APACHE
+DB_SERVICE=$SVC_DB
+APACHE_RELOAD="$RELOAD_APACHE"
+DB_HOST=127.0.0.1
+DB_PREFIX=bd_
+KEEP_BACKUPS=7
+NOTIFY=
+HOOKS=$STARDUST/hooks
+# Git URL template. %s is the platform name.
+# STARDUST_GIT_TEMPLATE=git@git.example:org/%s.git
+STARDUST_GIT_TEMPLATE=
+# Branch names (defaults match roles). Override for main/staging/production.
+BRANCH_DEVEL=devel
+BRANCH_TEST=test
+BRANCH_LIVE=live
+# STARDUST_BRANCH=
+CSF_ALLOW="10.8.0.0/24 192.168.1.0/24"
+EOF
+  as_root chmod 0644 "$dest"
+  echo "wrote $dest"
+}
+
+csf_set() {
+  # csf_set KEY VALUE — replace KEY = in /etc/csf/csf.conf
+  key=$1
+  val=$2
+  conf=/etc/csf/csf.conf
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ csf $key = $val"
+    return 0
+  fi
+  [ -f "$conf" ] || return 1
+  as_root sed -i "s|^${key} = .*|${key} = \"$val\"|" "$conf"
+}
+
+setup_csf() {
+  if [ "$LOCALHOST" -eq 1 ]; then
+    echo "localhost: skip CSF / WireGuard firewall policy"
+    return 0
+  fi
+  policy=$STARDUST/state/csf-policy.txt
+  tcp_in="80"
+  if [ "$ROLE" = test ] || [ "$ROLE" = live ]; then
+    tcp_in="80,443"
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ write $policy (SSH via WG/LAN only, UDP 51820, TCP $tcp_in)"
+  else
+    as_root sh -c "cat > '$policy'" <<EOF
+# Stardust CSF policy — remote admin only over WireGuard
+# SSH is not in TCP_IN. Allow SSH from these sources in csf.allow:
+#   10.8.0.0/24     WireGuard (default)
+#   192.168.1.0/24  private LAN (override CSF_ALLOW)
+TCP_IN=$tcp_in
+UDP_IN=51820
+TCP6_IN=
+UDP6_IN=51820
+TESTING=1
+RESTRICT_SYSLOG=3
+EOF
+    as_root chown "$OWNER:$GROUP" "$policy"
+    echo "wrote $policy"
+  fi
+
+  if [ "$DO_CSF" -eq 0 ]; then
+    echo "note: CSF not applied (pass -F to install/apply)"
+    return 0
+  fi
+
+  if ! have csf && [ ! -x /usr/sbin/csf ]; then
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ download + install CSF from download.configserver.com"
+    else
+      work=$(as_root mktemp -d)
+      as_root wget -q -O "$work/csf.tgz" https://download.configserver.com/csf.tgz || {
+        echo "$PROG: could not fetch CSF tarball; install CSF by hand then re-run -F" >&2
+        return 1
+      }
+      as_root tar -xzf "$work/csf.tgz" -C "$work"
+      if [ -x "$work/csf/install.sh" ]; then
+        as_root sh "$work/csf/install.sh"
+      fi
+    fi
+  fi
+
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ apply CSF policy TCP_IN=$tcp_in UDP_IN=51820 TESTING=1"
+    echo "+ csf.allow ${CSF_ALLOW:-10.8.0.0/24 192.168.1.0/24}"
+    return 0
+  fi
+
+  if [ ! -f /etc/csf/csf.conf ]; then
+    echo "$PROG: CSF conf missing after install" >&2
+    return 1
+  fi
+
+  csf_set TCP_IN "$tcp_in"
+  csf_set UDP_IN "51820"
+  csf_set TCP_OUT "20,21,22,25,53,80,110,113,443,587,993,995,9418"
+  csf_set UDP_OUT "53,113,123,51820"
+  csf_set TESTING "1"
+  csf_set RESTRICT_SYSLOG "3"
+  # Drop 22 from the public inbound list if a stock install put it back.
+  if grep -q 'TCP_IN = ".*22' /etc/csf/csf.conf; then
+    csf_set TCP_IN "$tcp_in"
+  fi
+
+  for src in ${CSF_ALLOW:-10.8.0.0/24 192.168.1.0/24}; do
+    if ! grep -q "$src" /etc/csf/csf.allow 2>/dev/null; then
+      as_root sh -c "echo '$src # Stardust SSH/WG' >> /etc/csf/csf.allow"
+    fi
+  done
+
+  if have csf; then
+    as_root csf -r || true
+  fi
+  echo "CSF applied with TESTING=1. After you confirm WG SSH still works:"
+  echo "  sudo sed -i 's/^TESTING = .*/TESTING = \"0\"/' /etc/csf/csf.conf && sudo csf -r"
+}
+
+# Long flags getopts cannot see.
+NEWARGS=""
+for arg in "$@"; do
+  case $arg in
+    --localhost|-lh)
       LOCALHOST=1
-      shift # FIXED: Discards the option immediately to avoid creating an infinite loop
+      ROLE=devel
+      DO_CSF=0
       ;;
-    -m) 
-      ROLE=$(normalize_role "$2")
-      shift 
+    --human)
+      # next token consumed below if present as --human=NAME form
       ;;
-    *) 
-      shift 
+    --human=*)
+      HUMAN=${arg#--human=}
+      ;;
+    *)
+      NEWARGS="$NEWARGS $arg"
       ;;
   esac
 done
+# shellcheck disable=SC2086
+eval set -- $NEWARGS
 
-# Initialize the runtime footprint
-[ -z "$HUMAN" ] && HUMAN=$(whoami)
-detect_os; detect_init; detect_group; detect_services
-ROLE=$(normalize_role "$ROLE")
+while getopts 'nFm:u:g:a:H:h' opt; do
+  case $opt in
+    n) DRYRUN=1 ;;
+    F) DO_CSF=1 ;;
+    m) ROLE=$OPTARG ;;
+    u) OWNER=$OPTARG ;;
+    a) ADMIN=$OPTARG ;;
+    H) HUMAN=$OPTARG ;;
+    g) GROUP=$OPTARG ;;
+    h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
 
-log_info "===================================================="
-log_info "$PROG $STARDUST_VERSION — Running Fresh Stardust Orchestration..."
-log_info "===================================================="
+if [ "$LOCALHOST" -eq 1 ]; then
+  ROLE=devel
+  DO_CSF=0
+fi
 
-# Initialize configuration states before spawning the module cascade
-write_etc_conf
-
-# ------------------------------------------------------------------------------
-# 6. UNREDIRECTED INTERACTIVE SEQUENTIAL ORCHESTRATION LOOP
-# ------------------------------------------------------------------------------
-# Scans the target folder and executes module scripts in a strict alphanumeric sequence.
-if [ -d "$HERE/modules" ]; then
-  for module in "$HERE/modules/"[0-9][0-9]-*.sh; do
-    if [ -f "$module" ]; then
-      
-      # COMPLIANCE OVERRIDE: Skip the legacy file to prevent variable pollution
-      if [ "$(basename "$module")" = "10-dependencies.sh" ]; then
-        continue
-      fi
-      
-      log_info "▶️ Running module: $(basename "$module")"
-      
-      # POSIX Conditional Sourcing Pattern: Evaluates the worker file directly inside 
-      # the parent context, allowing interactive prompts while tracking execution status cleanly.
-      if ! . "$module"; then
-        log_err "❌ Error: Module $(basename "$module") failed execution."
-        exit 1
-      fi
-    fi
-  done
+if [ -z "$HUMAN" ]; then
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    HUMAN=$SUDO_USER
+  elif [ "$(id -u)" -ne 0 ] && [ -n "${USER:-}" ] && [ "$USER" != root ]; then
+    HUMAN=$USER
+  fi
+fi
+if [ "$HUMAN" = "$OWNER" ] || [ "$HUMAN" = "$ADMIN" ]; then
+  HUMAN=""
+fi
+if [ -z "$HUMAN" ]; then
+  echo "note: no extra operator user (pass -H NAME if you want one besides $OWNER / $ADMIN)"
 else
-  log_err "❌ Error: modules/ folder configuration track could not be verified."
+  echo "operator account: $HUMAN"
+fi
+
+ROLE=$(normalize_role "$ROLE")
+if [ -z "$ROLE" ]; then
+  echo "$PROG: unknown role. Use devel, test, or live." >&2
+  exit 2
+fi
+
+detect_os
+detect_init
+detect_group
+detect_services
+
+HOSTN=$(hostname 2>/dev/null || echo unknown)
+echo "$PROG role=$ROLE localhost=$LOCALHOST host=$HOSTN os=$OS_ID pkg=$PKG init=$INIT owner=$OWNER admin=$ADMIN human=$HUMAN group=$GROUP dryrun=$DRYRUN"
+
+# --- run app install phases -------------------------------------------
+# Helpers live in this file. Each apps/<name>/install.sh is one phase.
+# Order comes from apps/MANIFEST (not directory sort). modules/NN-*.sh
+# remain as thin shims that source the same files.
+
+run_app_phase() {
+  app=$1
+  inst=$HERE/apps/$app/install.sh
+  if [ ! -f "$inst" ]; then
+    echo "$PROG: apps/$app/install.sh missing" >&2
+    return 1
+  fi
+  echo "==> app $app"
+  # shellcheck disable=SC1090
+  . "$inst"
+}
+
+ran=0
+if [ -f "$HERE/apps/MANIFEST" ]; then
+  while IFS= read -r app || [ -n "$app" ]; do
+    case $app in
+      ''|\#*) continue ;;
+    esac
+    [ -f "$HERE/apps/$app/install.sh" ] || continue
+    if ! run_app_phase "$app"; then
+      echo "$PROG: app $app failed" >&2
+      exit 1
+    fi
+    ran=$((ran + 1))
+  done < "$HERE/apps/MANIFEST"
+elif [ -d "$HERE/modules" ]; then
+  echo "$PROG: apps/MANIFEST missing — falling back to modules/"
+  for module in "$HERE/modules/"[0-9][0-9]-*.sh; do
+    [ -f "$module" ] || continue
+    echo "==> $(basename "$module")"
+    # shellcheck disable=SC1090
+    if ! . "$module"; then
+      echo "$PROG: module $(basename "$module") failed" >&2
+      exit 1
+    fi
+    ran=$((ran + 1))
+  done
+fi
+
+if [ "$ran" -eq 0 ]; then
+  echo "$PROG: no app install phases found (apps/*/install.sh)" >&2
   exit 1
 fi
 
-log_info "Stardust orchestration loop completed successfully!"
+echo "done."
+echo "set passwords: sudo passwd $OWNER && sudo passwd $ADMIN"
+if [ -n "$HUMAN" ]; then
+  echo "               sudo passwd $HUMAN"
+  echo "refresh groups: exec su - $HUMAN"
+fi
+echo "check host:    stardust doctor"
+echo "list sites:    stardust list"
+echo "Bee: bee --root=$PLATFORMS/<platform>/web --site=<product> <cmd>"
+echo "reload apache with: $RELOAD_APACHE"

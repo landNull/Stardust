@@ -1,0 +1,8 @@
+apps/bee/install.sh
+apps/bee/lib.sh
+modules/50-bee.sh
+verbs: stardust bee PLATFORM PRODUCT [bee-args]
+install: git clone backdrop-contrib/bee -> /usr/local/src/bee
+         symlink /usr/local/bin/bee
+rule: CLI PHP must keep exec; do not disable_functions on CLI
+rule: Bee is not installed via Composer

@@ -1,0 +1,23 @@
+# Host-install order. One app per line. Runtime-only apps are listed
+# after a blank line and are not sourced by install-stardust.sh.
+#
+# Contract (unchanged):
+#   /srv/platforms  /srv/stardust  bd_*  stardust-priv
+#   ff-only promote  refuse sudo on user binaries  exit 0/1/2  -n dry-run
+
+host
+apache
+php
+security
+mariadb
+deploy
+bee
+gitea
+
+# runtime (not an install phase)
+core
+platform
+site
+doctor
+migrate-d7
+ui

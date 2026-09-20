@@ -1,0 +1,3 @@
+bin/stardust-menu
+tui/
+clients only — they must call stardust, not Bee/mysql directly

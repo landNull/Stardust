@@ -1,0 +1,3 @@
+lib/platform.sh
+lib/promote.sh
+verbs: platform-add platform-upgrade promote

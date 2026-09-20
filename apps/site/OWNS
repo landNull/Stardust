@@ -1,0 +1,7 @@
+lib/site.sh
+lib/backup.sh
+lib/clone.sh
+lib/check.sh
+lib/ops.sh
+verbs: site-add site-delete site-backup site-restore site-clone site-check
+verbs: site-disable site-enable backup-all cron-all inventory

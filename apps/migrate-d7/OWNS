@@ -1,0 +1,7 @@
+lib/d7.sh
+lib/d7-catalog.txt
+bin/d7-migrate
+docs/d7-migration.txt
+man/d7-migrate.1
+verbs: stardust d7 …
+rule: never bee install on an imported D7 schema

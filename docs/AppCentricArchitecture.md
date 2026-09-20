@@ -1,3 +1,29 @@
+# Current app map (devel, 2026-09-20)
+
+Host install order is `apps/MANIFEST`, not filename sort.
+
+| App | Host phase | Runtime |
+|-----|------------|---------|
+| core | — | `lib/common.sh` |
+| host | `apps/host/install.sh` | `bin/stardust`, `bin/stardust-priv`, `bin/crdir` |
+| apache | `apps/apache/install.sh` | Apache vhosts via site-add |
+| php | `apps/php/install.sh` | 30-stardust.ini / FPM harden / CLI |
+| security | `apps/security/install.sh` | extras, VPS sysctl, CSF `-F` |
+| mariadb | `apps/mariadb/install.sh` | `bd_*` via stardust-priv |
+| deploy | `apps/deploy/install.sh` | ship tools, cron, state |
+| bee | `apps/bee/install.sh` | `apps/bee/lib.sh` → `stardust bee` |
+| gitea | `apps/gitea/install.sh` | prompt only |
+| platform | — | `lib/platform.sh` `lib/promote.sh` |
+| site | — | `lib/site.sh` backup clone check ops |
+| doctor | — | `lib/doctor.sh` |
+| migrate-d7 | — | `lib/d7.sh` `bin/d7-migrate` |
+| ui | — | `bin/stardust-menu` `tui/` |
+
+Paths and contract are unchanged: `/srv/platforms`, `/srv/stardust`, `bd_*`,
+`stardust-priv`, ff-only promote, refuse sudo on user binaries.
+
+---
+
 # Stardust Control Plane: App-Centric Architecture & Git Guide
 
 This document captures the complete architectural blueprint, step-by-step refactoring guidelines, safe deployment procedures, and version control procedures engineered to transition the Stardust automation platform from a legacy monolithic script into an industry-standard, **App-Centric Module system**.

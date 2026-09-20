@@ -1,0 +1,8 @@
+install-stardust.sh
+stardust-install.sh
+bin/stardust-priv
+bin/crdir
+bin/stardust
+modules/10-core-prereqs.sh
+cleanup-stardust.sh
+cleanup-modules/
