@@ -268,21 +268,20 @@ fi
 # Write base configuration layer out safely
 write_etc_conf
 
-# --- FIX: Consolidated into a single, isolated, fault-tolerant execution loop ---
+# --- The Sequential Orchestration Loop ---
 if [ -d "$HERE/modules" ]; then
   for module in "$HERE/modules/"[0-9][0-9]-*.sh; do
     if [ -f "$module" ]; then
       echo "▶️ Running module: $(basename "$module")"
       
-      set +e
-      . "$module"
-      module_status=$?
-      set -eu
-      
-      if [ $module_status -ne 0 ]; then
-        echo "❌ Error: Module $(basename "$module") exited with non-zero status ($module_status)." >&2
+      # --- FIX: ShellCheck-compliant POSIX execution tracking block ---
+      if ! . "$module"; then
+        echo "❌ Error: Module $(basename "$module") failed to execute correctly." >&2
         exit 1
       fi
     fi
   done
 else
+  echo "❌ Error: The modules/ folder configuration area could not be reached." >&2
+  exit 1
+fi
