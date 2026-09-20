@@ -1,5 +1,6 @@
 #!/bin/sh
 # install-stardust.sh — Modular orchestrator control engine for Stardust
+# Refactored to fix duplicate loop execution bugs and variable leaking gaps.
 set -eu
 
 PROG=${0##*/}
@@ -7,7 +8,7 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 STARDUST_VERSION=0.4.0
 
 if [ -f "$HERE/VERSION" ]; then
-  STARDUST_VERSION=$(tr -d ' \n' < "$HERE/VERSION")
+  STARDUST_VERSION=$(tr -d ' \r\n' < "$HERE/VERSION")
 fi
 if [ -d "$HERE/bin" ] && [ -d "$HERE/lib" ]; then
   BINDIR=$HERE/bin; LIBSRC=$HERE/lib; MANDIR=$HERE/man; TUIDIR=$HERE/tui
@@ -15,22 +16,30 @@ else
   BINDIR=$HERE; LIBSRC=$HERE/stardust-lib; MANDIR=$HERE; TUIDIR=$HERE/stardust-tui
 fi
 
-DRYRUN=0; DO_CSF=0; LOCALHOST=0; ROLE=devel; OWNER=deploy; ADMIN=www-admin; HUMAN=""
-DAEMON=""; GROUP=""; PLATFORMS=/srv/platforms; STARDUST=/srv/stardust; CONF=""
+export DRYRUN=0; export DO_CSF=0; export LOCALHOST=0; export ROLE=devel
+export OWNER="${OWNER:-deploy}"; export ADMIN="${ADMIN:-www-admin}"; export GROUP="${GROUP:-www-admin}"
+HUMAN=""; DAEMON=""; PLATFORMS=/srv/platforms; export STARDUST=/srv/stardust
 CSF_ALLOW="10.8.0.0/24 192.168.1.0/24"; BEE_SRC=https://github.com
 BEE_DST=/usr/local/src/bee; BEE_BIN=/usr/local/bin/bee
 
-PKG=unknown; INIT=unknown; OS_ID=unknown; SVC_APACHE=""; SVC_DB=""; RELOAD_APACHE=""
+export PKG=unknown; export INIT=unknown; export OS_ID=unknown; export SVC_APACHE=""
+export SVC_DB=""; export RELOAD_APACHE=""
 
-# --- Core Mechanics Shared System Helper Functions ---
 usage() {
   cat <<EOF
-$PROG $STARDUST_VERSION — Prepare any Stardust host (Apache2 + PHP + MariaDB + Bee + Gitea)
-[Usage instructions truncated for script scale efficiency...]
+Usage: $PROG [options]
+  -n               Dry run mode. Simulates configuration passings.
+  -lh|--localhost  Force local runtime environments.
+  -F               Enable CSF firewall setups.
+  -m <role>        System deployment role (devel, test, live).
+  -u <owner>       Override code asset storage owner account.
+  -a <admin>       Override administrator account identity.
+  -g <group>       Override default systems worker execution group.
+  -h               Show this help architecture overview menu.
 EOF
 }
 
-as_root() { [ "$(id -u)" -ne 0 ] && sudo "$@" || "$@"; }
+as_root() { if [ "$(id -u)" -ne 0 ]; then sudo "$@"; else "$@"; fi }
 
 run_root() {
   if [ "$DRYRUN" -eq 1 ]; then
@@ -38,23 +47,28 @@ run_root() {
   fi
   cmd_summary="$1"
   [ -n "${2:-}" ] && cmd_summary="$cmd_summary $2"
-  printf "  \033[33m⏳ Processing:\033[0m [%s] ...                     \r" "$cmd_summary"
+  printf "  \\033[33m⏳ Processing:\\033[0m [%s] ...                     \r" "$cmd_summary"
+  
+  set +e
   as_root "$@"
   cmd_status=$?
+  set -eu
+  
   if [ $cmd_status -eq 0 ]; then
-    printf "  \033[32m✓\033[0m Completed: [%s]                               \n" "$cmd_summary"
+    printf "  \\033[32m✓\\033[0m Completed: [%s]                               \n" "$cmd_summary"
   else
-    printf "  \033[31m✗\033[0m Failed (%s): [%s]                             \n" "$cmd_status" "$cmd_summary"
+    printf "  \\033[31m✗\\033[0m Failed (%s): [%s]                             \n" "$cmd_status" "$cmd_summary"
     return $cmd_status
   fi
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
 normalize_role() {
   case $1 in
-    devel|localhost|dev) echo devel ;;
-    test|vps-test) echo test ;;
-    live|vps-live|prod|production) echo live ;;
+    devel|localhost|dev) echo "devel" ;;
+    test|vps-test) echo "test" ;;
+    live|vps-live|prod|production) echo "live" ;;
     *) echo "" ;;
   esac
 }
@@ -83,7 +97,6 @@ detect_group() {
     elif getent passwd apache >/dev/null 2>&1; then DAEMON=apache
     else DAEMON=www-data; fi
   fi
-  [ -z "$GROUP" ] && GROUP=www-admin
 }
 
 detect_services() {
@@ -139,13 +152,18 @@ write_dropin() {
   echo "wrote $dest"
 }
 
-write_if_absent() { [ -e "$dest" ] && echo "exists: $dest" || write_dropin "$dest"; }
+# --- FIX: Mapped positional argument $1 properly instead of relying on global $dest leak ---
+write_if_absent() {
+  target_file=$1
+  [ -e "$target_file" ] && echo "exists: $target_file" || write_dropin "$target_file"; 
+}
 
+# --- FIX: Added single quotes to 'EOF' to prevent premature host variable evaluation ---
 write_etc_conf() {
   dest=/etc/stardust.conf
   [ -f "$dest" ] && echo "global config exists: $dest" && return 0
   [ "$DRYRUN" -eq 1 ] && echo "+ write $dest" && return 0
-  as_root sh -c "cat > '$dest'" <<EOF
+  as_root sh -c "cat > '$dest'" << 'EOF'
 STARDUST_ROLE=$ROLE
 STARDUST_ROOT=$STARDUST
 PLATFORMS=$PLATFORMS
@@ -153,7 +171,7 @@ OWNER=$OWNER
 ADMIN=$ADMIN
 DAEMON=$DAEMON
 GROUP=$GROUP
-BEE=\$(command -v bee 2>/dev/null || echo $BEE_BIN)
+BEE=$(command -v bee 2>/dev/null || echo $BEE_BIN)
 APACHE_SERVICE=$SVC_APACHE
 DB_SERVICE=$SVC_DB
 APACHE_RELOAD="$RELOAD_APACHE"
@@ -232,55 +250,39 @@ echo "===================================================="
 echo "$PROG $STARDUST_VERSION — Starting Stardust installation..."
 echo "===================================================="
 
-# Inside install-stardust.sh (Directly above the orchestration module loop)
-
-# --- Automated Error Safety Exit Path ---
 if [ "$DRYRUN" -eq 1 ]; then
   echo "🛡️ Running in strict Dry-Run Verification Mode."
   echo "    Checking structural baseline readiness before mocking execution..."
-  
-  # Validate that the system environment has a supported package manager discovered
   if [ "$PKG" = "unknown" ]; then
     echo "❌ DRY-RUN VALIDATION FAILURE: Unsupported or missing OS package manager architecture." >&2
     exit 2
   fi
-  
-  # Verify that critical root privileges can be invoked via sudo safely
   if ! have sudo && [ "$(id -u)" -ne 0 ]; then
     echo "❌ DRY-RUN VALIDATION FAILURE: Non-root user lacks sudo fallback utility binary execution paths." >&2
     exit 3
   fi
-  
   echo "  ✓ Structural boundaries clean. Simulating worker cascade logs:"
   echo "--------------------------------------------------------"
 fi
 
-# --- The Sequential Orchestration Loop ---
-for module in "$HERE/modules/"[0-9][0-9]-*.sh; do
-  if [ -f "$module" ]; then
-    echo "▶️ Running module: $(basename "$module")"
-    . "$module" || {
-      echo "❌ Error: Module $(basename "$module") failed to execute correctly." >&2
-      exit 1
-    }
-  fi
-done
+# Write base configuration layer out safely
+write_etc_conf
 
-# --- The Sequential Orchestration Loop ---
-for module in "$HERE/modules/"[0-9][0-9]-*.sh; do
-  if [ -f "$module" ]; then
-    echo "▶️ Running module: $(basename "$module")"
-    . "$module" || {
-      echo "❌ Error: Module $(basename "$module") failed to execute correctly." >&2
-      exit 1
-    }
-  fi
-done
-
-echo ""
-echo "Stardust installation complete!"
-echo "Next steps:"
-echo "1. Set passwords for users: sudo passwd $OWNER, sudo passwd $ADMIN"
-echo "2. Configure Gitea at http://$(hostname):3000 (if installed)"
-echo "3. Run 'stardust doctor' to verify the installation"
-
+# --- FIX: Consolidated into a single, isolated, fault-tolerant execution loop ---
+if [ -d "$HERE/modules" ]; then
+  for module in "$HERE/modules/"[0-9][0-9]-*.sh; do
+    if [ -f "$module" ]; then
+      echo "▶️ Running module: $(basename "$module")"
+      
+      set +e
+      . "$module"
+      module_status=$?
+      set -eu
+      
+      if [ $module_status -ne 0 ]; then
+        echo "❌ Error: Module $(basename "$module") exited with non-zero status ($module_status)." >&2
+        exit 1
+      fi
+    fi
+  done
+else
