@@ -5,10 +5,18 @@ set -eu
 PROG=${0##*/}
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
-# Export core boundaries to worker profiles
+# Inside cleanup-stardust.sh — Updated Global Variables Block
+
 export STARDUST=/srv/stardust
 export DRYRUN=0
-export PURGE_ALL=0  # Initialize flag state tracker as false (0)
+export PURGE_ALL=0
+
+# FIX: Injected robust fallback parameter expansions.
+# If these variables are dropped by sudo, they will gracefully fall back to 
+# the default Stardust system profile naming conventions automatically.
+export OWNER="${OWNER:-deploy}"
+export ADMIN="${ADMIN:-www-admin}"
+export GROUP="${GROUP:-www-admin}"
 FORCE=0
 
 usage() {
