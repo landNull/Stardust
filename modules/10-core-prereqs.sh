@@ -109,20 +109,18 @@ prereqs_enforce_security() {
     uname="${u%%:*}"
     ucomment="${u##*:}"
     
-    # --- FIXED: IDEMPOTENCY GUARD ---
-    # Only execute user creation commands if the account name is completely unregistered.
-    # This prevents the script from throwing Exit Code 9 (username already in use) errors.
-    if ! id "$uname" >/dev/null 2>&1; then
+    # --- FIX: Comprehensive User & Group Name Collision Guard ---
+    # Only try to create the account if the name is completely free in both indexes
+    if ! id "$uname" >/dev/null 2>&1 && ! getent group "$uname" >/dev/null 2>&1; then
       if have useradd; then
         run_root useradd -m -s /bin/bash -c "$ucomment" -G "$GROUP" "$uname"
       elif have adduser && [ "$PKG" = "apt" ]; then
         run_root adduser --disabled-password --gecos "$ucomment" --ingroup "$GROUP" "$uname"
       else
-        # Safe fallback for bare-minimum POSIX platforms
         run_root useradd -m -G "$GROUP" "$uname"
       fi
     else
-      echo "  user ok: $uname (already exists, skipping creation)"
+      echo "  user/group ok: $uname (name partition already claimed, skipping creation)"
     fi
     
     # Safely append group memberships cleanly across systems
