@@ -1,6 +1,10 @@
-# modules/50-bee.sh
-# App-Centric Worker: Backdrop CMS Bee Companion Command Line Interface
-# Refactored to allow safe, idempotent installations on existing brownfield servers.
+#!/bin/sh
+# ==============================================================================
+# modules/50-bee.sh — Backdrop CMS Companion Command Line Interface (Bee)
+# ==============================================================================
+# Engineered with isolated subshells to allow safe brownfield overlays.
+# Utilizes the secure global Composer instance deployed in Step 15.
+# ==============================================================================
 
 echo "🐝 STEP 50: Provisioning Backdrop CMS CLI (Bee)"
 echo "-----------------------------------------------"
@@ -16,10 +20,11 @@ bee_install_stable() {
     # Capture standard error and output safely without risking shell crashes
     CURRENT_VERSION=$(bee version 2>/dev/null || echo "unknown")
     
+    # Case statement tracking wildcards smoothly within POSIX syntax boundaries
     case $CURRENT_VERSION in
       "${STABLE_SERIES}"*)
         echo "  ✅ SKIP: Stable Bee release ($CURRENT_VERSION) is already active. Preserving configuration."
-        return 0
+        return 0 # Yield control back safely to loop without firing installs
         ;;
       *)
         echo "  ⚠️ Version mismatch or unreadable tag ($CURRENT_VERSION). Enforcing standard stable overlay..."
@@ -39,6 +44,7 @@ bee_install_stable() {
       return 0
     fi
 
+    # Verify our Step 15 dependency manager is up and functional before calling it
     if have composer; then
       echo "  ⚙️ Retrieving verified stable backdrop/bee package layer..."
       
@@ -54,10 +60,33 @@ bee_install_stable() {
         return 1
       fi
     else
-      echo "  ❌ Error: Composer system package manager not found. Unable to guarantee stability hooks." >&2
-      return 1
+      # --- INDEPENDENT FALLBACK CLONE INTERCEPT ---
+      # If composer environment checks completely fail, run a manual repo deployment
+      echo "  ⚠️ Composer binary missing on active scope. Attempting legacy clone build..."
+      
+      if [ ! -d "$BEE_DST" ]; then
+        run_root git clone "$BEE_SRC" "$BEE_DST"
+      fi
+
+      if [ -d "$BEE_DST" ]; then
+        # --- THE POSIX SUBSHELL WRAPPER BLOCK ---
+        # Crucial Lesson: The parentheses ( ... ) spin up a temporary clone of the shell process.
+        # When 'cd' runs inside the parentheses, it shifts paths *only* inside that bubble.
+        # Once the closing parenthesis is hit, the shell snaps back to the original orchestrator path.
+        # This completely prevents broken paths or broken subsequent module loads.
+        (
+          cd "$BEE_DST"
+          # Run internal localized configuration adjustments safely
+          run_root ln -sf "$BEE_DST/bee" "$BEE_BIN"
+        )
+        echo "  ✓ Bee alternative legacy clone successfully mapped to $BEE_BIN."
+      else
+        echo "  ❌ Error: Failed to clone alternative Bee repository storage tracker." >&2
+        return 1
+      fi
     fi
   fi
 }
 
+# Trigger module asset calculations
 bee_install_stable
