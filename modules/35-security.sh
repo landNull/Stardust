@@ -44,7 +44,7 @@ ensure_user() {
     elif have useradd; then
       run_root useradd -m -s /bin/bash -c "$comment" -G "$GROUP" "$name"
     elif have adduser; then
-      run_root adduser -D -s /bin/ash -G "$GROUP" "$name"
+      run_root useradd -m -s /bin/bash -G "$GROUP" "$name"
     fi
   fi
 

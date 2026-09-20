@@ -107,7 +107,7 @@ prereqs_enforce_security() {
         run_root adduser --disabled-password --gecos "$ucomment" --ingroup "$GROUP" "$uname"
       else
         # Safe fallback for lightweight systems (like BusyBox/Alpine variants)
-        run_root adduser -D -G "$GROUP" "$uname"
+        run_root useradd -m -G "$GROUP" "$uname"
       fi
     fi
     
