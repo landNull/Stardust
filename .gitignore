@@ -22,3 +22,4 @@ restic.env
 *.tar.gz
 *.zip
 /tmp/
+install.log
