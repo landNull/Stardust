@@ -68,65 +68,37 @@ install_git() {
 
 install_bee() {
   if ! command -v bee >/dev/null 2>&1; then
-    install_prompt "Install Bee (Backdrop CMS CLI)? [Y/n]" "Y" "Bee is a command line utility for Backdrop CMS."
+    install_prompt "Install Bee (Backdrop CMS CLI)? [Y/n]" "Y" "Bee is a command-line tool for managing Backdrop CMS sites. It is required for Stardust operations."
     if [ "$ans" = "Y" ] || [ "$ans" = "y" ]; then
-      
-      echo "🌐 Querying GitHub API for the absolute latest stable Bee release tag..."
-      
-      if have curl && have jq; then
-        LATEST_TAG=$(curl -s "https://github.com" | jq -r '.tag_name // empty')
-      else
-        LATEST_TAG=""
+      if [ ! -d "$BEE_DST" ]; then
+        run_root git clone "$BEE_SRC" "$BEE_DST"
       fi
-
-      if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-        echo "  ⚠️ Warning: API limit reached or metadata hidden. Falling back to tracking release branch standard..."
-        LATEST_TAG="1.x-1.x"
+      if [ -d "$BEE_DST" ]; then
+        if have composer; then
+          # FIX: Force a subshell wrapper context using parentheses ( ... ) 
+          # This ensures that 'cd' doesn't alter the execution path of the parent orchestrator loop!
+          (
+            cd "$BEE_DST"
+            run_root composer install --no-dev
+            run_root ln -sf "$BEE_DST/bee" "$BEE_BIN"
+          )
+          echo "Bee installed to $BEE_BIN."
+        else
+          echo "Composer is not installed. Bee dependencies cannot be installed automatically."
+          echo "Install Composer manually from https://getcomposer.org and run:"
+          echo "  cd $BEE_DST && composer install --no-dev"
+          echo "  ln -s $BEE_DST/bee $BEE_BIN"
+        fi
       else
-        echo "  ✓ Identified latest stable release target: $LATEST_TAG"
-      fi
-
-      # FIX: Dynamically provision an isolated, temporary directory with clean root ownership barriers
-      BEE_TMP_DIR=$(mktemp -d /tmp/bee-install-XXXXXX)
-
-      # Clean up any previous production configuration path fragments
-      as_root rm -rf "$BEE_DST"
-      as_root mkdir -p "$(dirname "$BEE_DST")"
-
-      echo "📥 Downloading compiled stable release package..."
-      if [ "$DRYRUN" -eq 1 ]; then
-        echo "+ wget -O $BEE_TMP_DIR/bee.tar.gz https://github.com{LATEST_TAG}.tar.gz"
-        echo "+ tar -xzf $BEE_TMP_DIR/bee.tar.gz -C $BEE_TMP_DIR"
-        echo "+ ln -sf $BEE_DST/bee.php $BEE_BIN"
-      else
-        # 1. Download into our isolated, owned directory context to bypass sticky bits
-        as_root wget -q --show-progress -O "$BEE_TMP_DIR/bee.tar.gz" \
-          "https://github.com{LATEST_TAG}.tar.gz" || \
-        as_root wget -q --show-progress -O "$BEE_TMP_DIR/bee.tar.gz" \
-          "https://github.com{LATEST_TAG}.tar.gz"
-
-        # 2. Extract cleanly within our custom directory workspace boundary
-        as_root tar -xzf "$BEE_TMP_DIR/bee.tar.gz" -C "$BEE_TMP_DIR"
-        
-        # 3. Pull folder and map accurately into standard production target locations
-        EXTRACTED_DIR=$(ls -d "$BEE_TMP_DIR"/bee-*)
-        as_root mv "$EXTRACTED_DIR" "$BEE_DST"
-        
-        # 4. Erase structural temp markers thoroughly
-        as_root rm -rf "$BEE_TMP_DIR"
-
-        # 5. Bind permissions and establish global execution link anchors
-        echo "⚙️ Linking binaries into execution paths..."
-        as_root chmod +x "$BEE_DST/bee.php"
-        as_root ln -sf "$BEE_DST/bee.php" "$BEE_BIN"
-        
-        echo "  ✓ Bee stable configuration successfully deployed to $BEE_BIN."
+        # FIX: Replaced the missing legacy 'error' command with standard POSIX safe error trapping
+        echo "❌ Error: Failed to clone Bee repository." >&2
+        return 1
       fi
     fi
   else
     echo "Bee is already installed at $(command -v bee)."
   fi
-}
+}   
    
 install_gitea() {
   if ! gitea_installed; then
