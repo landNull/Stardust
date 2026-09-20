@@ -1,0 +1,55 @@
+{
+  "stardust.architecture": {
+    "type": "App-Centric Module System",
+    "version": "0.4.0",
+    "designPattern": "Isolated Single-Responsibility Subsystems driven by an Orchestrator Core",
+    "executionModel": "Sequential loop sorting and sourcing scripts matching 'modules/[0-9][0-9]-*.sh' alphabetically"
+  },
+  "stardust.constraints": {
+    "shellTarget": "POSIX compliant /bin/sh (No non-standard bashisms/dashisms)",
+    "safetyDirectives": ["set -eu", "Quote here-doc delimiters like << 'EOF' to prevent premature evaluation"],
+    "targetEnvironments": {
+      "devel": "Local loopback setups, lax caching rules, debugging engines active",
+      "test": "Staging validation server pools",
+      "live": "Hardened multi-tenant nodes with locked security configs and optimized opcache"
+    }
+  },
+  "stardust.moduleMap": {
+    "orchestrator": "install-stardust.sh (Handles OS/Init detection, parses config arrays)",
+    "preFlightValidator": "test-stardust-vars.sh (POSIX environment sanity checking)",
+    "stateTearDown": "cleanup-stardust.sh (Reverse dependency purge script engine)",
+    "workers": {
+      "10-core-prereqs.sh": "System users, shared group, ssh keys, package sync templates",
+      "20-apache2.sh": "Apache installation, mpm_event threading limits, tracing signature removal",
+      "30-php.sh": "PHP-FPM processes, memory pools, validation timing variables, ini drops",
+      "40-mariadb.sh": "MariaDB server engine configurations, skip-networking controls, InnoDB loops",
+      "50-bee.sh": "Backdrop CMS Bee CLI tool compiling paths via Composer pipelines",
+      "60-gitea.sh": "Gitea repository daemon engine download and execution tracks"
+    },
+    "cleanupWorkers": {
+      "10-purge-packages.sh": "Dynamic, non-interactive apt framework deep cleansing cascade"
+    }
+  },
+  "ai.instructions": {
+    "systemPromptOverride": "You are a senior infrastructure engineering agent specializing in POSIX shell scripting and the Stardust Control Plane App-Centric system. Maintain strict structural separation between individual worker modules.",
+    "codingRules": [
+      "CRITICAL: Always check that variables inside function declarations do not use backslash escapes like '\\$1'—use standard '$1' tracking parameters instead.",
+      "CRITICAL: Never use the 'local' keyword inside function declarations, as standard POSIX shells do not universally guarantee support. Reset global loop parameters explicitly instead.",
+      "CRITICAL: When generating infrastructure configuration strings using a Here-Document (cat << EOF), always wrap the delimiter in single quotes (<< 'EOF') to prevent premature host shell evaluation.",
+      "Always rely on the auto-detected '$INIT' framework variable (systemd, openrc, sysv) inside workers rather than hardcoding legacy SysVinit path lines.",
+      "Ensure all file names inside 'modules/' use an action-oriented prefix or numeric execution token matching '[0-9][0-9]-*'."
+    ],
+    "documentationReferences": [
+      "stardust.1 (System Unix manual baseline)",
+      "STARDUST_CLI_REFERENCE.md (Command matrix details)"
+    ]
+  },
+  "files.associations": {
+    "*.sh": "shellscript",
+    "*.cnf": "ini",
+    "*.ini": "ini",
+    "stardust.1": "troff"
+  },
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true
+}
