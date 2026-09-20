@@ -66,22 +66,65 @@ install_git() {
 
 # Inside modules/10-dependencies.sh — Fix for install_bee() error path
 
+# Inside modules/10-dependencies.sh — Future-Proof Stable Bee Installer
+
 install_bee() {
   if ! command -v bee >/dev/null 2>&1; then
-    install_prompt "Install Bee (Backdrop CMS CLI)? [Y/n]" "Y" "Bee is required for Stardust operations."
+    install_prompt "Install Bee (Backdrop CMS CLI)? [Y/n]" "Y" "Bee is a command line utility for Backdrop CMS."
     if [ "$ans" = "Y" ] || [ "$ans" = "y" ]; then
-      if [ ! -d "$BEE_DST" ]; then run_root git clone "$BEE_SRC" "$BEE_DST"; fi
-      if [ -d "$BEE_DST" ]; then
-        if have composer; then
-          cd "$BEE_DST" && run_root composer install --no-dev && run_root ln -sf "$BEE_DST/bee" "$BEE_BIN"
-          echo "Bee installed to $BEE_BIN."
-        else
-          echo "Composer is not installed. Bee dependencies cannot be installed automatically."
-        fi
+      
+      echo "🌐 Querying GitHub API for the absolute latest stable Bee release tag..."
+      
+      # 1. Dynamically extract the latest stable release tag version string from GitHub's API registers
+      # We utilize jq to cleanly parse the json object without unstable text scraping.
+      if have curl && have jq; then
+        LATEST_TAG=$(curl -s "https://github.com" | jq -r '.tag_name // empty')
       else
-        # FIX: Replaced the non-existent 'error' command with a standard error echo redirection
-        echo "❌ Error: Failed to clone Bee repository." >&2
-        return 1
+        LATEST_TAG=""
+      fi
+
+      # 2. Resilient Fallback: If GitHub API rate limits are hit or curl lacks proxy tunnels, 
+      # fall back cleanly to a verified stable reference instead of crashing the installer loop.
+      if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+        echo "  ⚠️ Warning: API limit reached or metadata hidden. Falling back to tracking release branch standard..."
+        LATEST_TAG="1.x-1.x"
+      else
+        echo "  ✓ Identified latest stable release target: $LATEST_TAG"
+      fi
+
+      # 3. Clean up any corrupted previous fragments inside the scratch directory
+      as_root rm -rf "$BEE_DST" "/tmp/bee-download.tar.gz"
+      as_root mkdir -p "$(dirname "$BEE_DST")"
+
+      echo "📥 Downloading compiled stable release package..."
+      if [ "$DRYRUN" -eq 1 ]; then
+        echo "+ wget -O /tmp/bee-download.tar.gz https://github.com{LATEST_TAG}.tar.gz"
+        echo "+ tar -xzf /tmp/bee-download.tar.gz -C $(dirname "$BEE_DST")"
+        echo "+ ln -sf $BEE_DST/bee.php $BEE_BIN"
+      else
+        # Download the specific stable tarball package asset securely
+        as_root wget -q --show-progress -O /tmp/bee-download.tar.gz \
+          "https://github.com{LATEST_TAG}.tar.gz" || \
+        as_root wget -q --show-progress -O /tmp/bee-download.tar.gz \
+          "https://github.com{LATEST_TAG}.tar.gz"
+
+        # Extract archive layout maps directly into system source locations
+        as_root mkdir -p /tmp/bee-out
+        as_root tar -xzf /tmp/bee-download.tar.gz -C /tmp/bee-out
+        
+        # Normalize the extracted folder name to prevent trailing version-string mismatch bugs
+        EXTRACTED_DIR=$(ls -d /tmp/bee-out/bee-*)
+        as_root mv "$EXTRACTED_DIR" "$BEE_DST"
+        
+        # Cleanup file registers
+        as_root rm -rf /tmp/bee-out /tmp/bee-download.tar.gz
+
+        # 4. Bind permissions and establish global execution link anchors
+        echo "⚙️ Linking binaries into execution paths..."
+        as_root chmod +x "$BEE_DST/bee.php"
+        as_root ln -sf "$BEE_DST/bee.php" "$BEE_BIN"
+        
+        echo "  ✓ Bee stable configuration successfully deployed to $BEE_BIN."
       fi
     fi
   else
