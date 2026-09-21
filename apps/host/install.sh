@@ -28,6 +28,28 @@ if [ -n "$need" ]; then
 fi
 
 # --- users / groups ----------------------------------------------------
+# Defined here so this phase works even if the orchestrator is older.
+ensure_log_group() {
+  name=$1
+  [ -n "$name" ] || return 0
+  [ "$name" = "$OWNER" ] && return 0
+  if ! getent group adm >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! id "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ usermod -aG adm $name"
+    return 0
+  fi
+  usermod_bin=$(find_admin_bin usermod || true)
+  if [ -n "$usermod_bin" ]; then
+    run_root "$usermod_bin" -aG adm "$name" 2>/dev/null || true
+  fi
+  echo "log group: $name in adm (read /var/log, not sudo)"
+}
+
 ensure_group "$GROUP"
 ensure_group "$OWNER"
 ensure_group stardust
@@ -35,10 +57,12 @@ ensure_owner
 if [ -n "$ADMIN" ]; then
   ensure_user "$ADMIN" "Stardust web admin"
   ensure_stardust_groups "$ADMIN"
+  ensure_log_group "$ADMIN"
 fi
 # Invoking login (or -H NAME): groups only. Never useradd. Never group sudo.
 if [ -n "$HUMAN" ]; then
   ensure_stardust_groups "$HUMAN"
+  ensure_log_group "$HUMAN"
 fi
 if id "$DAEMON" >/dev/null 2>&1; then
   if [ "$DRYRUN" -eq 1 ]; then
