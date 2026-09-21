@@ -29,14 +29,14 @@ system:
              live   = VPS checkout /srv/platforms/mysite-live
              Never run all three out of one working copy.
 
-  deploy     Unix user that owns Git and runs Bee
+  deploy     system account. Owns Git trees and runs Bee.
+             HOME /srv/stardust/home, shell nologin, locked password.
+             sudo -u deploy bee|git|crdir. Not a human login.
   www-admin  file group on every tree. Not a login.
-             Grant web-admin access with: usermod -aG www-admin NAME
-             Extra login only if you pass -a NAME and NAME is not
-             the group (./stardust-install.sh -a webmaster).
-  operator   daily login. Default: who ran the installer
-             (SUDO_USER / USER). Override with -H NAME.
-             Groups: www-admin, stardust, adm, deploy.
+             Grant: usermod -aG www-admin,stardust,deploy NAME
+             The installer adds the invoking login to those three
+             groups only. It never adds group sudo.
+  operator   whoever ran the installer (or -H NAME). Must already exist.
              After usermod: exec su - $USER
              (exec bash / exec zsh do NOT refresh groups)
   www-data   Apache / PHP daemon user; also in group www-admin
@@ -275,12 +275,13 @@ Pick ONE profile. Preview, then run for real.
   ./stardust-install.sh -F -m live
 
 What every profile does
-  creates user deploy and group www-admin; operator = invoking login or -H NAME
+  creates system account deploy (HOME /srv/stardust/home, nologin) and group www-admin
   no user named www-admin unless you pass -a NAME (NAME != www-admin)
-  puts operator in www-admin,stardust,adm,deploy; www-data in www-admin
+  puts invoking login in www-admin,stardust,deploy only — never group sudo
+  www-data in www-admin
   /srv/stardust + /srv/platforms 2770 deploy:www-admin + default ACL
-  secrets dir 0750 deploy:stardust (no www-data)
-  /etc/stardust.conf and ~/.stardust.conf for deploy, operator, optional -a NAME
+  secrets dir 0750 deploy:stardust; deploy HOME 0700 deploy:deploy (no ACL inherit)
+  /etc/stardust.conf; ~/.stardust.conf for deploy and the invoking login
   PHP drop-in + optional one php-fpm pool as www-data + mpm_event
   PHP split: 30-stardust.ini all SAPIs; 35-stardust-harden.ini FPM/apache2
     (disable_functions; live/test opcache.validate_timestamps=0)
@@ -292,16 +293,15 @@ What every profile does
   needrestart, msmtp-mta (put /etc/msmtprc before NOTIFY= works)
   MariaDB bind 127.0.0.1; root stays unix_socket (do not SET PASSWORD)
   git safe.directory /srv/platforms for deploy
-  sudoers: NOPASSWD stardust-priv + bee/git/crdir as deploy only
+  sudoers: deploy + %www-admin get NOPASSWD stardust-priv / bee+git+crdir as deploy
+             (no usermod -aG sudo; no per-user sudoers line)
   ships stardust, stardust-priv, stardust-menu, stardust-tui if built
 
 After any profile
 
-  sudo passwd deploy
-  sudo passwd "$USER"
   exec su - "$USER"
   id    # must list www-admin and stardust
-  # put SSH keys in each ~/.ssh/authorized_keys
+  # deploy forge key: /srv/stardust/home/.ssh  (not /home/deploy)
 
 The installer does not set passwords and does not invent keys.
 

@@ -72,30 +72,37 @@ cmd_doctor() {
   echo "Stardust doctor"
   echo "role=${STARDUST_ROLE:-unset} host=$(hostname 2>/dev/null || echo unknown)"
 
-  for u in "$OWNER" "$HUMAN"; do
-    [ -n "$u" ] || continue
-    if id "$u" >/dev/null 2>&1; then ok "user $u"; else bad "user $u missing"; fail=1; fi
-  done
+  if id "$OWNER" >/dev/null 2>&1; then ok "user $OWNER"; else bad "user $OWNER missing"; fail=1; fi
   if [ -n "$ADMIN" ]; then
     if id "$ADMIN" >/dev/null 2>&1; then ok "user $ADMIN"; else bad "user $ADMIN missing"; fail=1; fi
   else
     note "no extra admin login (group $GROUP is the web-admin grant)"
   fi
   if getent group "$GROUP" >/dev/null 2>&1; then ok "group $GROUP"; else bad "group $GROUP missing"; fail=1; fi
+  if getent group stardust >/dev/null 2>&1; then ok "group stardust"; else bad "group stardust missing"; fail=1; fi
   me=$(id -un)
   groups_me=$(id -nG 2>/dev/null || true)
   note "running as $me groups=$groups_me"
-  if [ "$me" = "$HUMAN" ] || [ "$me" = "$OWNER" ] || { [ -n "$ADMIN" ] && [ "$me" = "$ADMIN" ]; }; then
-    ok "operator account $me"
-  else
-    note "not ${HUMAN:-?}/$OWNER${ADMIN:+/$ADMIN} — expect sudo prompts unless groups match"
+  if echo " $groups_me " | grep -q " sudo "; then
+    note "in group sudo — installer did not add this; OS policy"
   fi
   if echo " $groups_me " | grep -q " $GROUP "; then
     ok "in web group $GROUP (0770 write)"
   else
-    note "not in $GROUP — file writes may need sudo"
+    bad "not in $GROUP — usermod -aG $GROUP,stardust,$OWNER $me"; fail=1
   fi
-  if [ -f /etc/sudoers.d/stardust-human ]; then ok "sudoers human"; else note "sudoers human snippet missing"; fi
+  if echo " $groups_me " | grep -q " stardust "; then
+    ok "in group stardust (secrets)"
+  else
+    note "not in stardust — secrets stay unreadable"
+  fi
+  if [ -f /etc/sudoers.d/stardust-deploy ]; then ok "sudoers deploy+%${GROUP}"; else note "sudoers stardust-deploy missing"; fi
+  owner_home=$(getent passwd "$OWNER" 2>/dev/null | cut -d: -f6)
+  if [ -n "$owner_home" ] && [ -d "$owner_home" ]; then
+    ok "owner home $owner_home"
+  else
+    note "owner home missing (expect $STARDUST_ROOT/home)"
+  fi
 
   for d in "$STARDUST_ROOT" "$STARDUST_ROOT/backups" "$STARDUST_ROOT/bin" "$STARDUST_ROOT/state" "$PLATFORMS"; do
     if [ -d "$d" ]; then ok "dir $d"; else bad "dir $d missing"; fail=1; fi

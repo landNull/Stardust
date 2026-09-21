@@ -4,7 +4,8 @@
 # Contract: artifacts/stardust-settings.json
 #
 # Detects package manager and init. Does not assume Devuan or systemd.
-# Creates deploy + group www-admin, ships crdir/newfeature/stardust, tunes
+# Creates system account deploy (HOME under $STARDUST/home, nologin) +
+# group www-admin, ships crdir/newfeature/stardust, tunes
 # PHP/MariaDB/Apache, writes logrotate + state. No PHP GUI.
 # Does not wipe /srv/platforms or existing platform checkouts.
 # Does not install nginx, Podman, or rewrite firewall/VPN.
@@ -65,8 +66,9 @@ $PROG $STARDUST_VERSION — prepare any Stardust host (Apache + PHP + MariaDB + 
 
 WHAT THIS IS FOR
   One script for any host. Detects apt vs other managers and
-  sysvinit vs systemd vs OpenRC. Creates user deploy and group www-admin,
-  the $STARDUST control plane, missing packages, PHP/MariaDB snippets,
+  sysvinit vs systemd vs OpenRC. Creates system account deploy
+  (HOME $STARDUST/home, shell nologin, locked password) and group
+  www-admin, the $STARDUST control plane, missing packages, PHP/MariaDB snippets,
   companion CLIs (crdir, newfeature, stardust, bee), and conf files.
   PHP: 30-stardust.ini every SAPI; 35-stardust-harden.ini FPM/apache2
   only; 35-stardust-cli.ini leaves Bee able to exec.
@@ -77,22 +79,21 @@ WHAT THIS IS FOR
   Leaves $PLATFORMS trees alone. No Aegir/BOA frontend.
 
 USERS
-  $OWNER      owns platforms and the control plane; limited sudo
+  $OWNER      system account. Owns platforms and the control plane.
+                 HOME $STARDUST/home, shell nologin, no password.
+                 Not a human login. sudo -u $OWNER bee|git|crdir.
   $GROUP      file group on every tree (default: www-admin).
-                 Not a login. Grant web-admin access by adding a
-                 person to this group.
+                 Not a login. This is the web-admin grant.
+  stardust    secrets group. Not www-data.
+  invoking    the login that ran this script is added to
+                 $GROUP, stardust, and $OWNER only.
+                 Never added to sudo, admin, or wheel.
+                 The account is not created; it must already exist.
   extra login  only if you pass -a NAME and NAME is not $GROUP.
-  operator    login that runs stardust day to day.
-                 Default: the account that invoked this script
-                 (SUDO_USER or USER), never a hard-coded name.
-                 Override with -H. Groups: $GROUP, stardust, adm, $OWNER.
   daemon      Apache/PHP user (www-data or apache); also in $GROUP.
 
-  Passwords are not set. After the first run:
-    sudo passwd $OWNER
-    sudo passwd OPERATOR   # the login that ran this script, or -H NAME
-    sudo passwd NAME       # only if you passed -a NAME
-  Drop SSH keys into each home's .ssh/authorized_keys yourself.
+  No passwords are set. $OWNER is locked. Humans keep the password
+  they already have. Put deploy's forge key in $STARDUST/home/.ssh.
 
 HOW TO RUN IT
   $PROG [-n] [-lh|--localhost] [-F] [-m devel|test|live] [-u owner] [-a admin] [-H human] [-g group]
@@ -111,7 +112,8 @@ FLAGS
   -a admin   Optional extra login. Omitted by default. Ignored when
              NAME equals the file group (www-admin): that name is a
              group, not a user.
-  -H user    Daily operator (default: whoever ran this script)
+  -H user    Existing login to put in Stardust groups
+             (default: whoever ran this script). Not created.
   -g group   File group on every tree (default: www-admin)
   -F         Install/apply CSF. SSH is not world-open: only 10.8.0.0/24
              (WireGuard) and 192.168.1.0/24 (LAN). UDP 51820 stays open
@@ -384,11 +386,122 @@ ensure_group() {
   return 1
 }
 
+nologin_shell() {
+  for s in /usr/sbin/nologin /sbin/nologin /usr/bin/nologin; do
+    [ -x "$s" ] && { echo "$s"; return 0; }
+  done
+  echo /usr/sbin/nologin
+}
+
+is_privilege_group() {
+  case $1 in
+    sudo|admin|wheel|root) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Groups a human needs to admin Stardust. Never sudo/admin/wheel.
+stardust_admin_groups() {
+  echo "$GROUP"
+  echo stardust
+  echo "$OWNER"
+}
+
+ensure_stardust_groups() {
+  # ensure_stardust_groups LOGIN — add only Stardust admin groups.
+  name=$1
+  [ -n "$name" ] || return 0
+  if ! id "$name" >/dev/null 2>&1; then
+    echo "note: login $name does not exist; not creating it"
+    echo "note: after adduser $name: usermod -aG $GROUP,stardust,$OWNER $name"
+    return 0
+  fi
+  usermod_bin=$(find_admin_bin usermod || true)
+  for g in $(stardust_admin_groups); do
+    [ -n "$g" ] || continue
+    if is_privilege_group "$g"; then
+      echo "note: refusing to add $name to privilege group $g"
+      continue
+    fi
+    if ! getent group "$g" >/dev/null 2>&1; then
+      continue
+    fi
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ usermod -aG $g $name"
+      continue
+    fi
+    if [ -n "$usermod_bin" ]; then
+      run_root "$usermod_bin" -aG "$g" "$name" 2>/dev/null || true
+    fi
+  done
+  echo "groups for $name: $GROUP,stardust,$OWNER (not sudo)"
+}
+
+ensure_owner_home() {
+  home=$STARDUST/home
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ mkdir -p $home $home/.ssh"
+    echo "+ chown $OWNER:$OWNER $home && chmod 0700 $home"
+    return 0
+  fi
+  run_root mkdir -p "$home/.ssh"
+  run_root chown "$OWNER:$OWNER" "$home" "$home/.ssh"
+  run_root chmod 0700 "$home" "$home/.ssh"
+  if have setfacl; then
+    as_root setfacl -b "$home" 2>/dev/null || true
+    as_root setfacl -b "$home/.ssh" 2>/dev/null || true
+  fi
+}
+
+ensure_owner() {
+  # System account: HOME $STARDUST/home, nologin, locked password.
+  # If the uid already exists (older install), leave shell/home alone.
+  shell=$(nologin_shell)
+  home=$STARDUST/home
+  adduser_bin=$(find_admin_bin adduser || true)
+  useradd_bin=$(find_admin_bin useradd || true)
+  if id "$OWNER" >/dev/null 2>&1; then
+    echo "user ok: $OWNER (existing; not rewriting shell or home)"
+    ensure_stardust_groups "$OWNER"
+    ensure_owner_home
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ mkdir -p $home"
+    if [ -n "$adduser_bin" ] && [ "$PKG" = apt ]; then
+      echo "+ adduser --system --home $home --shell $shell --disabled-password --ingroup $OWNER --gecos 'Stardust deploy' $OWNER"
+    else
+      echo "+ useradd -r -m -d $home -s $shell -g $OWNER -c 'Stardust deploy' $OWNER"
+    fi
+    echo "+ usermod -aG $GROUP,stardust $OWNER"
+    return 0
+  fi
+  run_root mkdir -p "$STARDUST"
+  if [ -n "$adduser_bin" ] && [ "$PKG" = apt ]; then
+    run_root "$adduser_bin" --system --home "$home" --shell "$shell" \
+      --disabled-password --ingroup "$OWNER" --gecos "Stardust deploy" "$OWNER" || {
+      echo "$PROG: cannot create system user $OWNER (adduser failed)" >&2
+      return 1
+    }
+  elif [ -n "$useradd_bin" ]; then
+    run_root "$useradd_bin" -r -m -d "$home" -s "$shell" -g "$OWNER" \
+      -c "Stardust deploy" "$OWNER" || {
+      echo "$PROG: cannot create system user $OWNER (useradd failed)" >&2
+      return 1
+    }
+  else
+    echo "$PROG: cannot create system user $OWNER (no useradd/adduser in /usr/sbin)" >&2
+    return 1
+  fi
+  echo "system user: $OWNER home=$home shell=$shell"
+  ensure_stardust_groups "$OWNER"
+  ensure_owner_home
+}
+
 ensure_user() {
-  # ensure_user NAME COMMENT
+  # ensure_user NAME COMMENT — optional human login (-a only).
   # useradd/adduser/usermod live in /usr/sbin; unprivileged PATH omits it.
-  # ADMIN defaults to the same string as GROUP (www-admin), so a UPG create
-  # would collide with the file group ensure_group already made.
+  # Never used for $OWNER (that is ensure_owner) or the invoking operator.
   name=$1
   comment=$2
   adduser_bin=$(find_admin_bin adduser || true)
@@ -1335,11 +1448,6 @@ fi
 if [ "$HUMAN" = "$OWNER" ] || [ "$HUMAN" = "$ADMIN" ]; then
   HUMAN=""
 fi
-if [ -z "$HUMAN" ]; then
-  echo "note: no extra operator user (pass -H NAME if you want one besides $OWNER / $ADMIN)"
-else
-  echo "operator account: $HUMAN"
-fi
 
 ROLE=$(normalize_role "$ROLE")
 if [ -z "$ROLE" ]; then
@@ -1362,6 +1470,11 @@ if [ -n "$ADMIN" ]; then
   echo "extra admin login: $ADMIN"
 else
   echo "file group: $GROUP (no extra admin login; pass -a NAME to add one)"
+fi
+if [ -z "$HUMAN" ]; then
+  echo "note: no invoking login to add to Stardust groups (pass -H NAME)"
+else
+  echo "operator login: $HUMAN (groups only: $GROUP,stardust,$OWNER — not sudo)"
 fi
 
 HOSTN=$(hostname 2>/dev/null || echo unknown)
@@ -1417,13 +1530,10 @@ if [ "$ran" -eq 0 ]; then
 fi
 
 echo "done."
-echo "set passwords: sudo passwd $OWNER"
-if [ -n "$ADMIN" ]; then
-  echo "               sudo passwd $ADMIN"
-fi
+echo "$OWNER is a system account (nologin, locked). No passwd."
 if [ -n "$HUMAN" ]; then
-  echo "               sudo passwd $HUMAN"
   echo "refresh groups: exec su - $HUMAN"
+  echo "confirm:        id $HUMAN   # must list $GROUP and stardust, not require sudo"
 fi
 echo "check host:    stardust doctor"
 echo "list sites:    stardust list"

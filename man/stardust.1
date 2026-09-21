@@ -575,15 +575,20 @@ cd /home/deploy/stardust
 .SH WORDS YOU WILL SEE
 .TP
 .B deploy
-Unix account that owns Git trees and runs Bee.
+System account that owns Git trees and runs Bee.
+HOME
+.B /srv/stardust/home ,
+shell nologin, locked password.
 .TP
 .B www-admin
 File group on every tree. Not a login.
-Add a person with
-.B usermod \-aG www-admin NAME .
-An extra login is created only by
-.B stardust-install.sh \-a NAME
-when NAME is not this group.
+The installer adds the invoking login to
+.BR www-admin ,
+.BR stardust ,
+and
+.B deploy
+only. It never adds group
+.BR sudo .
 .TP
 .B www-data
 Apache/PHP daemon group.

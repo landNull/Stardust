@@ -31,79 +31,48 @@ fi
 ensure_group "$GROUP"
 ensure_group "$OWNER"
 ensure_group stardust
-ensure_user "$OWNER" "Stardust deploy"
+ensure_owner
 if [ -n "$ADMIN" ]; then
   ensure_user "$ADMIN" "Stardust web admin"
+  ensure_stardust_groups "$ADMIN"
 fi
+# Invoking login (or -H NAME): groups only. Never useradd. Never group sudo.
 if [ -n "$HUMAN" ]; then
-  ensure_user "$HUMAN" "Stardust operator"
+  ensure_stardust_groups "$HUMAN"
 fi
-
-if [ "$DRYRUN" -eq 1 ]; then
-  [ -n "$HUMAN" ] && echo "+ usermod -aG $GROUP,stardust,adm,$OWNER $HUMAN"
-  [ -n "$ADMIN" ] && echo "+ usermod -aG $GROUP,stardust $ADMIN"
-  echo "+ usermod -aG $GROUP,stardust $OWNER"
-else
-  if [ -n "$HUMAN" ]; then
-    for g in "$GROUP" stardust adm "$OWNER"; do
-      getent group "$g" >/dev/null 2>&1 || continue
-      run_root usermod -aG "$g" "$HUMAN" 2>/dev/null || true
-    done
-  fi
-  if [ -n "$ADMIN" ]; then
-    run_root usermod -aG "$GROUP,stardust" "$ADMIN" 2>/dev/null || true
-  fi
-  run_root usermod -aG "$GROUP,stardust" "$OWNER" 2>/dev/null || true
-  if id "$DAEMON" >/dev/null 2>&1; then
+if id "$DAEMON" >/dev/null 2>&1; then
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ usermod -aG $GROUP $DAEMON"
+  else
     run_root usermod -aG "$GROUP" "$DAEMON" 2>/dev/null || true
   fi
 fi
 
 # --- sudoers (limited; same on every host) -------------------------
 # User binaries refuse sudo. Only stardust-priv is the root helper.
+# Humans get rights via group $GROUP, not via usermod -aG sudo and
+# not via a per-user sudoers line.
 SUDO_PRIV="# Stardust — priv helper on $HOSTN
+# $OWNER is the service account. Humans are in group $GROUP.
 Defaults:$OWNER !requiretty
+Defaults:%$GROUP !requiretty
 $OWNER ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
 $OWNER ALL=(root) NOPASSWD: /usr/sbin/a2ensite, /usr/sbin/a2dissite, /usr/sbin/a2enmod
-"
-if [ -n "$ADMIN" ]; then
-  SUDO_PRIV="${SUDO_PRIV}Defaults:$ADMIN !requiretty
-$ADMIN ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
-$ADMIN ALL=($OWNER) NOPASSWD: /usr/local/bin/bee, /usr/bin/git, /usr/local/bin/crdir
-"
-fi
-if [ -n "$HUMAN" ]; then
-  SUDO_PRIV="${SUDO_PRIV}Defaults:$HUMAN !requiretty
-$HUMAN ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
-$HUMAN ALL=($OWNER) NOPASSWD: /usr/local/bin/bee, /usr/bin/git, /usr/local/bin/crdir
-"
-fi
-
-SUDO_DEPLOY="$SUDO_PRIV"
-SUDO_HUMAN="# Stardust — $HUMAN extra (see stardust-priv)
+%$GROUP ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
+%$GROUP ALL=($OWNER) NOPASSWD: /usr/local/bin/bee, /usr/bin/git, /usr/local/bin/crdir
 "
 
 if [ -d /etc/sudoers.d ]; then
-  write_sudoers /etc/sudoers.d/stardust-deploy "$SUDO_DEPLOY"
-  if [ -n "$ADMIN" ]; then
-    write_sudoers /etc/sudoers.d/stardust-admin "# Stardust — $ADMIN extra (see stardust-priv)
-"
-  fi
-  if [ -n "$HUMAN" ]; then
-    write_sudoers /etc/sudoers.d/stardust-human "$SUDO_HUMAN"
-  fi
+  write_sudoers /etc/sudoers.d/stardust-deploy "$SUDO_PRIV"
 else
   echo "note: /etc/sudoers.d missing; add the limited sudo rules by hand"
 fi
 
-logins=$OWNER
-[ -n "$ADMIN" ] && logins="$logins|$ADMIN"
-[ -n "$HUMAN" ] && logins="$logins|$HUMAN"
 PROFILE=/etc/profile.d/stardust.sh
-PROFILE_BODY="# Stardust: PATH + group-writable files for $OWNER ${ADMIN:+$ADMIN }${HUMAN:+$HUMAN}
+PROFILE_BODY="# Stardust: PATH + group-writable files for members of $GROUP
 export PATH=\"/usr/local/bin:/srv/stardust/bin:\$PATH\"
-case \$(id -un) in
-  $logins)
+case \" \$(id -nG 2>/dev/null) \" in
+  *\" $GROUP \"*)
     umask 002
     ;;
 esac
@@ -150,6 +119,9 @@ if have setfacl; then
 else
   echo "note: setfacl missing — install the acl package"
 fi
+
+# HOME for $OWNER sits under $STARDUST but must not inherit www-admin/www-data.
+ensure_owner_home
 
 if [ "$DRYRUN" -eq 1 ]; then
   echo "+ # leave $PLATFORMS contents untouched"
