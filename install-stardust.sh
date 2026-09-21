@@ -381,21 +381,46 @@ ensure_group() {
 
 ensure_user() {
   # ensure_user NAME COMMENT
+  # useradd/adduser/usermod live in /usr/sbin; unprivileged PATH omits it.
+  # ADMIN defaults to the same string as GROUP (www-admin), so a UPG create
+  # would collide with the file group ensure_group already made.
   name=$1
   comment=$2
+  adduser_bin=$(find_admin_bin adduser || true)
+  useradd_bin=$(find_admin_bin useradd || true)
+  usermod_bin=$(find_admin_bin usermod || true)
   if id "$name" >/dev/null 2>&1; then
     echo "user ok: $name"
   else
-    if [ "$DRYRUN" -eq 1 ]; then
-      echo "+ useradd -m -s /bin/bash -c '$comment' -G $GROUP $name"
-    elif have adduser && [ "$PKG" = apt ]; then
-      run_root adduser --disabled-password --gecos "$comment" --ingroup "$GROUP" "$name"
-    elif have useradd; then
-      run_root useradd -m -s /bin/bash -c "$comment" -G "$GROUP" "$name"
-    elif have adduser; then
-      run_root adduser -D -s /bin/ash -G "$GROUP" "$name"
+    if getent group "$name" >/dev/null 2>&1; then
+      primary=$name
     else
-      echo "$PROG: cannot create user $name" >&2
+      primary=$GROUP
+    fi
+    if [ "$DRYRUN" -eq 1 ]; then
+      if [ -n "$adduser_bin" ] && [ "$PKG" = apt ]; then
+        echo "+ adduser --disabled-password --gecos '$comment' --ingroup $primary $name"
+      else
+        echo "+ useradd -m -s /bin/bash -c '$comment' -g $primary -N $name"
+      fi
+    elif [ -n "$adduser_bin" ] && [ "$PKG" = apt ]; then
+      run_root "$adduser_bin" --disabled-password --gecos "$comment" --ingroup "$primary" "$name" || {
+        echo "$PROG: cannot create user $name (adduser failed)" >&2
+        return 1
+      }
+    elif [ -n "$useradd_bin" ]; then
+      run_root "$useradd_bin" -m -s /bin/bash -c "$comment" -g "$primary" -N "$name" || {
+        echo "$PROG: cannot create user $name (useradd failed)" >&2
+        return 1
+      }
+    elif [ -n "$adduser_bin" ]; then
+      run_root "$adduser_bin" -D -s /bin/ash -G "$primary" "$name" || {
+        echo "$PROG: cannot create user $name (adduser failed)" >&2
+        return 1
+      }
+    else
+      echo "$PROG: cannot create user $name (no useradd/adduser in PATH or /usr/sbin)" >&2
+      echo "$PROG: install passwd/adduser, or: sudo useradd -m -g $primary -N $name" >&2
       return 1
     fi
   fi
@@ -405,10 +430,10 @@ ensure_user() {
     return 0
   fi
 
-  if have usermod; then
-    run_root usermod -aG "$GROUP" "$name" 2>/dev/null || true
-  elif have adduser; then
-    run_root adduser "$name" "$GROUP" 2>/dev/null || true
+  if [ -n "$usermod_bin" ]; then
+    run_root "$usermod_bin" -aG "$GROUP" "$name" 2>/dev/null || true
+  elif [ -n "$adduser_bin" ]; then
+    run_root "$adduser_bin" "$name" "$GROUP" 2>/dev/null || true
   fi
 
   home=$(getent passwd "$name" 2>/dev/null | cut -d: -f6)
