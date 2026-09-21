@@ -21,10 +21,10 @@ No `www-admin`, `stardust`, or `deploy`. That is why doctor also reports
 those trees are `2770 deploy:www-admin` / `0750`. They exist; this shell
 cannot see them.
 
-- [ ] `exec su - sd` (not `exec bash`)
-- [ ] `id` lists `www-admin` and `stardust` (and `deploy`)
-- [ ] Confirm dirs as root if needed: `sudo ls -ld /srv/stardust /srv/stardust/backups /srv/stardust/bin /srv/stardust/state /usr/local/sbin/stardust-priv`
-- [ ] `stardust doctor` prints **READY** (exit 0)
+- [x] `exec su - sd` (not `exec bash`) / logout+login
+- [x] `id` lists `www-admin` and `stardust` (and `deploy`)
+- [x] `/srv/stardust/{backups,bin,state}` visible after group refresh
+- [x] `stardust doctor` prints **READY** (exit 0)
 - [ ] `stardust list` / `stardust env` / `bee` (no args) work
 
 Do **not** run `usermod` again unless `id` after `exec su -` still lacks
@@ -62,9 +62,8 @@ Current policy (already in `devel`):
       (`usermod -d /srv/stardust/home -s /usr/sbin/nologin deploy` + move
       `.ssh` / `.gitconfig` / `.stardust.conf`). New hosts already get
       `/srv/stardust/home`.
-- [ ] Align help text: `bin/stardust` still says `recommended: adm deploy`
-      and the pre-doctor group warning still suggests `adm`. Drop `adm`
-      from required/recommended to match the installer.
+- [x] Installer adds the invoking login to `adm` (log read, not sudo).
+      Re-run install + `exec su - sd` so the doctor banner drops.
 - [ ] Doctor should treat “cannot stat 2770 trees” as a group problem,
       not “dir missing”, so the next cold shell is less alarming.
 - [ ] Confirm no user named `www-admin` exists (`getent passwd www-admin`).
@@ -112,6 +111,49 @@ checkout under `/srv/platforms/mysite-test`.
 - [ ] `-F` only after WireGuard SSH is proven
 - [ ] `stardust -n promote mysite --to test` from the VPS checkout (ff-only)
 - [ ] Same for live
+
+---
+
+## Milestone 7 — `stardust error-logs` (multitail)
+
+`stardust log` is already the task journal (`/srv/stardust/state/tasks.log`).
+Do not reuse that name.
+
+multitail reads `~/.multitailrc` / `--config` for **colors and filters only**.
+It does not store a default file list. Stardust owns the list.
+
+- [ ] Package: add `multitail` to the devel/host package list (apt).
+- [ ] Config file (create if absent, never overwrite):
+      `/etc/stardust-logs.conf`
+      One path per line. `#` comments. Blank lines ignored.
+      Default contents (only files that exist are opened):
+
+      ```
+      # Stardust error-logs — paths for: stardust error-logs
+      /var/log/apache2/error.log
+      /var/log/apache2/access.log
+      /var/log/mysql/error.log
+      /var/log/syslog
+      /srv/stardust/state/tasks.log
+      ```
+
+      Optional later: `/var/log/php8.4-fpm.log`, per-vhost error logs.
+- [ ] Verb: `stardust error-logs`
+      Alias: `stardust logs-error`
+      Reads the conf, drops missing paths, `exec multitail -s 2 --` files.
+      `-n` prints the command and exits.
+      Missing `multitail`: message + `apt-get install multitail`, exit 1.
+      Empty file list: say so, exit 1.
+      Needs group `adm` to read `/var/log/*` (installer now adds it).
+- [ ] Do **not** wrap this in `stardust-priv`. It is a reader.
+- [ ] Doctor: note if `multitail` is missing; ok if present.
+- [ ] Help / man / tutorial: one line under groups / host extras.
+- [ ] Installer writes `/etc/stardust-logs.conf` the same way as
+      `/etc/msmtprc.example` (absent only).
+
+Wire-up: `bin/stardust` dispatch + `lib/` helper (new `lib/logs.sh` or
+a function in `lib/ops.sh`). App-centric option: `apps/logs/` later;
+first cut can live in `lib/` so the verb ships with the wrapper.
 
 ---
 
