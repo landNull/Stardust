@@ -4,7 +4,7 @@
 # Contract: artifacts/stardust-settings.json
 #
 # Detects package manager and init. Does not assume Devuan or systemd.
-# Creates deploy + www-admin, ships crdir/newfeature/stardust, tunes
+# Creates deploy + group www-admin, ships crdir/newfeature/stardust, tunes
 # PHP/MariaDB/Apache, writes logrotate + state. No PHP GUI.
 # Does not wipe /srv/platforms or existing platform checkouts.
 # Does not install nginx, Podman, or rewrite firewall/VPN.
@@ -40,7 +40,7 @@ DO_CSF=0
 LOCALHOST=0
 ROLE=devel
 OWNER=deploy
-ADMIN=www-admin
+ADMIN=""
 HUMAN=""
 DAEMON=""
 GROUP=""
@@ -65,7 +65,7 @@ $PROG $STARDUST_VERSION — prepare any Stardust host (Apache + PHP + MariaDB + 
 
 WHAT THIS IS FOR
   One script for any host. Detects apt vs other managers and
-  sysvinit vs systemd vs OpenRC. Creates users deploy and www-admin,
+  sysvinit vs systemd vs OpenRC. Creates user deploy and group www-admin,
   the $STARDUST control plane, missing packages, PHP/MariaDB snippets,
   companion CLIs (crdir, newfeature, stardust, bee), and conf files.
   PHP: 30-stardust.ini every SAPI; 35-stardust-harden.ini FPM/apache2
@@ -78,17 +78,20 @@ WHAT THIS IS FOR
 
 USERS
   $OWNER      owns platforms and the control plane; limited sudo
-  $ADMIN      extra login that writes the same 0770 trees
+  $GROUP      file group on every tree (default: www-admin).
+                 Not a login. Grant web-admin access by adding a
+                 person to this group.
+  extra login  only if you pass -a NAME and NAME is not $GROUP.
   operator    login that runs stardust day to day.
                  Default: the account that invoked this script
                  (SUDO_USER or USER), never a hard-coded name.
                  Override with -H. Groups: $GROUP, stardust, adm, $OWNER.
-  $GROUP     Apache daemon group (www-data or apache).
+  daemon      Apache/PHP user (www-data or apache); also in $GROUP.
 
   Passwords are not set. After the first run:
     sudo passwd $OWNER
-    sudo passwd $ADMIN
     sudo passwd OPERATOR   # the login that ran this script, or -H NAME
+    sudo passwd NAME       # only if you passed -a NAME
   Drop SSH keys into each home's .ssh/authorized_keys yourself.
 
 HOW TO RUN IT
@@ -105,7 +108,9 @@ FLAGS
              Role becomes devel. Apache and MariaDB stay on localhost.
   -m ROLE    devel (default), test, or live
   -u owner   Code owner (default: deploy)
-  -a admin   File-admin login (default: www-admin)
+  -a admin   Optional extra login. Omitted by default. Ignored when
+             NAME equals the file group (www-admin): that name is a
+             group, not a user.
   -H user    Daily operator (default: whoever ran this script)
   -g group   File group on every tree (default: www-admin)
   -F         Install/apply CSF. SSH is not world-open: only 10.8.0.0/24
@@ -1347,8 +1352,20 @@ detect_init
 detect_group
 detect_services
 
+# www-admin is the file group. A login of that name is opt-in via -a,
+# and only when the name is not the group.
+if [ -n "$ADMIN" ] && [ "$ADMIN" = "$GROUP" ]; then
+  echo "note: -a $ADMIN is the file group; not creating a login of that name"
+  ADMIN=""
+fi
+if [ -n "$ADMIN" ]; then
+  echo "extra admin login: $ADMIN"
+else
+  echo "file group: $GROUP (no extra admin login; pass -a NAME to add one)"
+fi
+
 HOSTN=$(hostname 2>/dev/null || echo unknown)
-echo "$PROG role=$ROLE localhost=$LOCALHOST host=$HOSTN os=$OS_ID pkg=$PKG init=$INIT owner=$OWNER admin=$ADMIN human=$HUMAN group=$GROUP dryrun=$DRYRUN"
+echo "$PROG role=$ROLE localhost=$LOCALHOST host=$HOSTN os=$OS_ID pkg=$PKG init=$INIT owner=$OWNER admin=${ADMIN:--} human=${HUMAN:--} group=$GROUP dryrun=$DRYRUN"
 
 # --- run app install phases -------------------------------------------
 # Helpers live in this file. Each apps/<name>/install.sh is one phase.
@@ -1400,7 +1417,10 @@ if [ "$ran" -eq 0 ]; then
 fi
 
 echo "done."
-echo "set passwords: sudo passwd $OWNER && sudo passwd $ADMIN"
+echo "set passwords: sudo passwd $OWNER"
+if [ -n "$ADMIN" ]; then
+  echo "               sudo passwd $ADMIN"
+fi
 if [ -n "$HUMAN" ]; then
   echo "               sudo passwd $HUMAN"
   echo "refresh groups: exec su - $HUMAN"

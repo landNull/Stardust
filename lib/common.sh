@@ -21,10 +21,14 @@ load_conf
 STARDUST_ROOT=${STARDUST_ROOT:-/srv/stardust}
 PLATFORMS=${PLATFORMS:-/srv/platforms}
 OWNER=${OWNER:-deploy}
-ADMIN=${ADMIN:-www-admin}
 HUMAN=${HUMAN:-}
 DAEMON=${DAEMON:-www-data}
 GROUP=${GROUP:-www-admin}
+# Optional extra login. Same string as GROUP means group-only (legacy conf).
+ADMIN=${ADMIN:-}
+if [ -n "$ADMIN" ] && [ "$ADMIN" = "$GROUP" ]; then
+  ADMIN=""
+fi
 DIR_MODE=${DIR_MODE:-0770}
 
 PRIV=${PRIV:-/usr/local/sbin/stardust-priv}

@@ -32,14 +32,16 @@ ensure_group "$GROUP"
 ensure_group "$OWNER"
 ensure_group stardust
 ensure_user "$OWNER" "Stardust deploy"
-ensure_user "$ADMIN" "Stardust web admin"
+if [ -n "$ADMIN" ]; then
+  ensure_user "$ADMIN" "Stardust web admin"
+fi
 if [ -n "$HUMAN" ]; then
   ensure_user "$HUMAN" "Stardust operator"
 fi
 
 if [ "$DRYRUN" -eq 1 ]; then
   [ -n "$HUMAN" ] && echo "+ usermod -aG $GROUP,stardust,adm,$OWNER $HUMAN"
-  echo "+ usermod -aG $GROUP,stardust $ADMIN"
+  [ -n "$ADMIN" ] && echo "+ usermod -aG $GROUP,stardust $ADMIN"
   echo "+ usermod -aG $GROUP,stardust $OWNER"
 else
   if [ -n "$HUMAN" ]; then
@@ -48,7 +50,9 @@ else
       run_root usermod -aG "$g" "$HUMAN" 2>/dev/null || true
     done
   fi
-  run_root usermod -aG "$GROUP,stardust" "$ADMIN" 2>/dev/null || true
+  if [ -n "$ADMIN" ]; then
+    run_root usermod -aG "$GROUP,stardust" "$ADMIN" 2>/dev/null || true
+  fi
   run_root usermod -aG "$GROUP,stardust" "$OWNER" 2>/dev/null || true
   if id "$DAEMON" >/dev/null 2>&1; then
     run_root usermod -aG "$GROUP" "$DAEMON" 2>/dev/null || true
@@ -59,12 +63,15 @@ fi
 # User binaries refuse sudo. Only stardust-priv is the root helper.
 SUDO_PRIV="# Stardust — priv helper on $HOSTN
 Defaults:$OWNER !requiretty
-Defaults:$ADMIN !requiretty
 $OWNER ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
-$ADMIN ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
 $OWNER ALL=(root) NOPASSWD: /usr/sbin/a2ensite, /usr/sbin/a2dissite, /usr/sbin/a2enmod
+"
+if [ -n "$ADMIN" ]; then
+  SUDO_PRIV="${SUDO_PRIV}Defaults:$ADMIN !requiretty
+$ADMIN ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
 $ADMIN ALL=($OWNER) NOPASSWD: /usr/local/bin/bee, /usr/bin/git, /usr/local/bin/crdir
 "
+fi
 if [ -n "$HUMAN" ]; then
   SUDO_PRIV="${SUDO_PRIV}Defaults:$HUMAN !requiretty
 $HUMAN ALL=(root) NOPASSWD: /usr/local/sbin/stardust-priv
@@ -73,14 +80,15 @@ $HUMAN ALL=($OWNER) NOPASSWD: /usr/local/bin/bee, /usr/bin/git, /usr/local/bin/c
 fi
 
 SUDO_DEPLOY="$SUDO_PRIV"
-SUDO_ADMIN="# Stardust — $ADMIN extra (see stardust-priv)
-"
 SUDO_HUMAN="# Stardust — $HUMAN extra (see stardust-priv)
 "
 
 if [ -d /etc/sudoers.d ]; then
   write_sudoers /etc/sudoers.d/stardust-deploy "$SUDO_DEPLOY"
-  write_sudoers /etc/sudoers.d/stardust-www-admin "$SUDO_ADMIN"
+  if [ -n "$ADMIN" ]; then
+    write_sudoers /etc/sudoers.d/stardust-admin "# Stardust — $ADMIN extra (see stardust-priv)
+"
+  fi
   if [ -n "$HUMAN" ]; then
     write_sudoers /etc/sudoers.d/stardust-human "$SUDO_HUMAN"
   fi
@@ -88,11 +96,14 @@ else
   echo "note: /etc/sudoers.d missing; add the limited sudo rules by hand"
 fi
 
+logins=$OWNER
+[ -n "$ADMIN" ] && logins="$logins|$ADMIN"
+[ -n "$HUMAN" ] && logins="$logins|$HUMAN"
 PROFILE=/etc/profile.d/stardust.sh
-PROFILE_BODY="# Stardust: PATH + group-writable files for $OWNER, $ADMIN, $HUMAN
+PROFILE_BODY="# Stardust: PATH + group-writable files for $OWNER ${ADMIN:+$ADMIN }${HUMAN:+$HUMAN}
 export PATH=\"/usr/local/bin:/srv/stardust/bin:\$PATH\"
 case \$(id -un) in
-  $OWNER|$ADMIN|$HUMAN)
+  $logins)
     umask 002
     ;;
 esac

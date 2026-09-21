@@ -72,17 +72,23 @@ cmd_doctor() {
   echo "Stardust doctor"
   echo "role=${STARDUST_ROLE:-unset} host=$(hostname 2>/dev/null || echo unknown)"
 
-  for u in "$OWNER" "$ADMIN" "$HUMAN"; do
+  for u in "$OWNER" "$HUMAN"; do
+    [ -n "$u" ] || continue
     if id "$u" >/dev/null 2>&1; then ok "user $u"; else bad "user $u missing"; fail=1; fi
   done
+  if [ -n "$ADMIN" ]; then
+    if id "$ADMIN" >/dev/null 2>&1; then ok "user $ADMIN"; else bad "user $ADMIN missing"; fail=1; fi
+  else
+    note "no extra admin login (group $GROUP is the web-admin grant)"
+  fi
   if getent group "$GROUP" >/dev/null 2>&1; then ok "group $GROUP"; else bad "group $GROUP missing"; fail=1; fi
   me=$(id -un)
   groups_me=$(id -nG 2>/dev/null || true)
   note "running as $me groups=$groups_me"
-  if [ "$me" = "$HUMAN" ] || [ "$me" = "$OWNER" ] || [ "$me" = "$ADMIN" ]; then
+  if [ "$me" = "$HUMAN" ] || [ "$me" = "$OWNER" ] || { [ -n "$ADMIN" ] && [ "$me" = "$ADMIN" ]; }; then
     ok "operator account $me"
   else
-    note "not $HUMAN/$OWNER/$ADMIN — expect sudo prompts unless groups match"
+    note "not ${HUMAN:-?}/$OWNER${ADMIN:+/$ADMIN} — expect sudo prompts unless groups match"
   fi
   if echo " $groups_me " | grep -q " $GROUP "; then
     ok "in web group $GROUP (0770 write)"

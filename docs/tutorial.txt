@@ -30,7 +30,10 @@ system:
              Never run all three out of one working copy.
 
   deploy     Unix user that owns Git and runs Bee
-  www-admin  extra human login AND the file group on every tree
+  www-admin  file group on every tree. Not a login.
+             Grant web-admin access with: usermod -aG www-admin NAME
+             Extra login only if you pass -a NAME and NAME is not
+             the group (./stardust-install.sh -a webmaster).
   operator   daily login. Default: who ran the installer
              (SUDO_USER / USER). Override with -H NAME.
              Groups: www-admin, stardust, adm, deploy.
@@ -272,11 +275,12 @@ Pick ONE profile. Preview, then run for real.
   ./stardust-install.sh -F -m live
 
 What every profile does
-  creates deploy, www-admin; operator = invoking login or -H NAME
+  creates user deploy and group www-admin; operator = invoking login or -H NAME
+  no user named www-admin unless you pass -a NAME (NAME != www-admin)
   puts operator in www-admin,stardust,adm,deploy; www-data in www-admin
   /srv/stardust + /srv/platforms 2770 deploy:www-admin + default ACL
   secrets dir 0750 deploy:stardust (no www-data)
-  /etc/stardust.conf and ~/.stardust.conf for deploy, www-admin, operator
+  /etc/stardust.conf and ~/.stardust.conf for deploy, operator, optional -a NAME
   PHP drop-in + optional one php-fpm pool as www-data + mpm_event
   PHP split: 30-stardust.ini all SAPIs; 35-stardust-harden.ini FPM/apache2
     (disable_functions; live/test opcache.validate_timestamps=0)
@@ -294,7 +298,6 @@ What every profile does
 After any profile
 
   sudo passwd deploy
-  sudo passwd www-admin
   sudo passwd "$USER"
   exec su - "$USER"
   id    # must list www-admin and stardust
@@ -317,6 +320,7 @@ list is empty until you add a platform.
 If doctor fails:
   bee / crdir not on PATH  → re-run the installer from the folder
                              that contains those files
+  user www-admin missing   → expected; www-admin is a group, not a login
   user deploy missing      → installer did not finish; run it again
   /srv/platforms missing   → same
   missing group www-admin  → sudo usermod -aG www-admin,stardust "$USER"

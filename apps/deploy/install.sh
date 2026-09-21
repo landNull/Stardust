@@ -29,7 +29,9 @@ if [ "$SVC_DB" = mysql ] && [ "$INIT" != systemd ]; then
 fi
 
 user_conf "$OWNER"
-user_conf "$ADMIN"
+if [ -n "$ADMIN" ]; then
+  user_conf "$ADMIN"
+fi
 if [ -n "$HUMAN" ]; then
   user_conf "$HUMAN"
 fi

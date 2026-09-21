@@ -10,13 +10,13 @@ echo "🔍 Starting Stardust Configuration Hand-Off Audit..."
 echo "===================================================="
 
 # 1. Define the exact array of critical variables required by worker modules
-REQUIRED_VARS="DRYRUN ROLE OWNER ADMIN GROUP PLATFORMS STARDUST PKG INIT OS_ID SVC_APACHE SVC_DB"
+REQUIRED_VARS="DRYRUN ROLE OWNER GROUP PLATFORMS STARDUST PKG INIT OS_ID SVC_APACHE SVC_DB"
 
 # 2. Mock a standard runtime baseline context (mimicking install-stardust.sh behavior)
 DRYRUN=1
 ROLE="devel"
 OWNER="deploy"
-ADMIN="www-admin"
+ADMIN=""
 GROUP="www-admin"
 PLATFORMS="/srv/platforms"
 STARDUST="/srv/stardust"

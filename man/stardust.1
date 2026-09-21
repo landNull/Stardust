@@ -123,8 +123,7 @@ section.
 .SS doctor
 Check that this box is ready:
 users
-.BR deploy ,
-.BR www-admin ,
+.B deploy
 and the operator login
 .RB ( \-H
 or the user who ran the installer);
@@ -132,6 +131,9 @@ groups
 .B www-admin
 and
 .BR stardust ;
+optional extra login only if
+.B \-a NAME
+was passed and NAME is not the file group;
 .B stardust-priv
 and
 .BR setfacl ;
@@ -342,8 +344,7 @@ and
 .B ~/.stardust.conf
 Per-user override
 .RB ( deploy
-and
-.BR www-admin ).
+and the operator login).
 .TP
 .B /srv/stardust
 Control plane: backups, state, extra binaries.
@@ -394,13 +395,14 @@ Run the same command without
 .BR \-n .
 Set passwords:
 .B sudo passwd deploy
-,
-.B sudo passwd www-admin
-, and
+and
 .B sudo passwd
 on the operator login
 then
 .B exec su \- $USER
+.
+.B www-admin
+is a group, not a login.
 .IP 4. 4
 .B stardust doctor
 must print READY.
@@ -576,7 +578,12 @@ cd /home/deploy/stardust
 Unix account that owns Git trees and runs Bee.
 .TP
 .B www-admin
-Human login that can write the same 0770 trees.
+File group on every tree. Not a login.
+Add a person with
+.B usermod \-aG www-admin NAME .
+An extra login is created only by
+.B stardust-install.sh \-a NAME
+when NAME is not this group.
 .TP
 .B www-data
 Apache/PHP daemon group.

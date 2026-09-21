@@ -10,7 +10,7 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
   echo "$PROG: do not run this with sudo or as root." >&2
-  echo "$PROG: log in as your operator account (or deploy / www-admin) and run: $PROG …" >&2
+  echo "$PROG: log in as your operator account (or deploy) and run: $PROG …" >&2
   echo "$PROG: the wrapper calls sudo -n only for the few root steps." >&2
   exit 2
 fi
