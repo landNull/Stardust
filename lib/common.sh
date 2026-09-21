@@ -125,14 +125,20 @@ show_help_pager() {
 }
 
 prompt_line() {
-  # prompt_line "Question" "default" [help_text]
+  # prompt_line "Question" "default" [help_text] [needed]
   # Type ? or help to open the pager. Empty keeps the default.
   q=$1
   def=${2:-}
   help=${3:-}
+  needed=${4:-}
   while :; do
     if [ -n "$help" ]; then
       printf '%s  (? help)\n' "$q" >&2
+    else
+      printf '%s\n' "$q" >&2
+    fi
+    if [ -n "$needed" ]; then
+      printf '%s\n' "$needed" >&2
     fi
     if [ -n "$def" ]; then
       printf '> [%s]: ' "$def" >&2
@@ -276,11 +282,13 @@ On GitHub it is landNull or an org name.
 %s becomes the platform name (ecom, torg, …).
 
 q in the pager returns here."
-  host=$(prompt_line "Git SSH host — machine name in git@HOST:…" "${scan_host}" "$help_host")
+  host=$(prompt_line "Git SSH host — machine name in git@HOST:…" "${scan_host}" "$help_host" \
+    "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
   if [ -z "$host" ]; then
     return 1
   fi
-  owner=$(prompt_line "Git owner/org — first path after the colon" "${scan_owner}" "$help_owner")
+  owner=$(prompt_line "Git owner/org — first path after the colon" "${scan_owner}" "$help_owner" \
+    "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git).")
   if [ -z "$owner" ]; then
     echo "$PROG: owner/org required for a template" >&2
     return 1

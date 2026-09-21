@@ -86,7 +86,7 @@ USERS
                  Not a login. This is the web-admin grant.
   stardust    secrets group. Not www-data.
   invoking    the login that ran this script is added to
-                 $GROUP, stardust, and $OWNER only.
+                 $GROUP, stardust, $OWNER, and adm.
                  Never added to sudo, admin, or wheel.
                  The account is not created; it must already exist.
   extra login  only if you pass -a NAME and NAME is not $GROUP.
@@ -287,6 +287,54 @@ pkg_install() {
   esac
 }
 
+say_yellow() {
+  if [ -t 1 ]; then
+    printf '\033[33m%s\033[0m\n' "$1"
+  else
+    echo "$1"
+  fi
+}
+
+# smartd's sysvinit script prints "failed!" in red when DEVICESCAN
+# finds nothing (typical VM). Scan first; stay quiet and yellow.
+smartctl_bin() {
+  b=$(find_admin_bin smartctl 2>/dev/null || true)
+  [ -n "$b" ] && { echo "$b"; return 0; }
+  command -v smartctl 2>/dev/null || true
+}
+
+smart_devices_found() {
+  bin=$(smartctl_bin)
+  [ -n "$bin" ] || return 1
+  if "$bin" --scan 2>/dev/null | grep -q '^/dev/'; then
+    return 0
+  fi
+  as_root "$bin" --scan-open 2>/dev/null | grep -q '^/dev/'
+}
+
+start_smartd() {
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ smartctl --scan && /etc/init.d/smartd start"
+    return 0
+  fi
+  if ! smart_devices_found; then
+    say_yellow "No SMART devices found"
+    return 0
+  fi
+  out=$(mktemp)
+  if [ -x /etc/init.d/smartd ]; then
+    as_root /etc/init.d/smartd start >"$out" 2>&1 || true
+  elif [ -x /etc/init.d/smartmontools ]; then
+    as_root /etc/init.d/smartmontools start >"$out" 2>&1 || true
+  else
+    svc_start smartd >/dev/null 2>&1 || true
+  fi
+  if grep -qiE 'fail|unable|no device' "$out" 2>/dev/null; then
+    say_yellow "No SMART devices found"
+  fi
+  rm -f "$out"
+}
+
 svc_start() {
   name=$1
   case $INIT in
@@ -435,6 +483,28 @@ ensure_stardust_groups() {
     fi
   done
   echo "groups for $name: $GROUP,stardust,$OWNER (not sudo)"
+}
+
+ensure_log_group() {
+  # adm: read /var/log (root:adm 0640). Not sudo. Humans only.
+  name=$1
+  [ -n "$name" ] || return 0
+  [ "$name" = "$OWNER" ] && return 0
+  if ! getent group adm >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! id "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ usermod -aG adm $name"
+    return 0
+  fi
+  usermod_bin=$(find_admin_bin usermod || true)
+  if [ -n "$usermod_bin" ]; then
+    run_root "$usermod_bin" -aG adm "$name" 2>/dev/null || true
+  fi
+  echo "log group: $name in adm (read /var/log, not sudo)"
 }
 
 ensure_owner_home() {
@@ -789,10 +859,11 @@ tune_extras() {
       echo "etckeeper: /etc is a git repo"
     fi
   fi
-  for s in haveged irqbalance smartd smartmontools; do
+  for s in haveged irqbalance; do
     [ -x "/etc/init.d/$s" ] || continue
     svc_start "$s"
   done
+  start_smartd
   if have msmtp || have msmtp-mta; then
     echo "note: copy /etc/msmtprc for NOTIFY= mail (msmtp-mta is installed)"
   fi
@@ -953,6 +1024,79 @@ collation-server = utf8mb4_unicode_ci
   fi
 }
 
+# Debian/Devuan equivalent of mariadb-secure-installation:
+# unix_socket root, no password, drop anonymous + remote root + test.
+# Never SET PASSWORD / IDENTIFIED BY. Each statement is isolated so
+# "plugin already loaded" cannot trip set -eu. mysql.user is a view
+# on MariaDB 10.4+ — use DROP USER, not DELETE FROM mysql.user.
+secure_mysql() {
+  echo "MariaDB: unix_socket root, no password, drop anon/remote-root/test"
+
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ start ${SVC_DB:-mysql}"
+    echo "+ mysql INSTALL SONAME 'auth_socket' (ignore if loaded)"
+    echo "+ mysql ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket"
+    echo "+ mysql DROP USER anonymous + root@not-local"
+    echo "+ mysql DROP DATABASE IF EXISTS test; FLUSH PRIVILEGES"
+    return 0
+  fi
+
+  if ! have mysql && ! have mariadb; then
+    echo "note: no mysql/mariadb client; skip privilege hardening"
+    return 0
+  fi
+
+  if [ -n "${SVC_DB:-}" ]; then
+    svc_start "$SVC_DB"
+    if [ "$SVC_DB" = mysql ] && [ "${INIT:-}" != systemd ] && [ -x /etc/init.d/mariadb ]; then
+      svc_start mariadb
+    fi
+  fi
+
+  cli=mysql
+  have mysql || cli=mariadb
+
+  tries=0
+  while [ "$tries" -lt 15 ]; do
+    if as_root "$cli" -N -e "SELECT 1" >/dev/null 2>&1; then
+      break
+    fi
+    tries=$((tries + 1))
+    sleep 1
+  done
+  if ! as_root "$cli" -N -e "SELECT 1" >/dev/null 2>&1; then
+    echo "note: mariadb not answering on the unix socket yet — start it, then re-run"
+    return 0
+  fi
+
+  as_root "$cli" -e "INSTALL SONAME 'auth_socket'" >/dev/null 2>&1 || true
+
+  if as_root "$cli" -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket" >/dev/null 2>&1; then
+    echo "mariadb: root@localhost is unix_socket (no password)"
+  else
+    echo "note: left root@localhost auth as-is (already socket, or not MariaDB ALTER USER)"
+  fi
+
+  tmp=$(mktemp)
+  if as_root "$cli" -N -B -e "SELECT CONCAT('DROP USER IF EXISTS ', QUOTE(User), '@', QUOTE(Host), ';') FROM mysql.user WHERE User = '' OR (User = 'root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'))" >"$tmp" 2>/dev/null; then
+    if [ -s "$tmp" ]; then
+      as_root "$cli" <"$tmp" >/dev/null 2>&1 || true
+      echo "mariadb: dropped anonymous / remote-root accounts"
+    fi
+  fi
+  rm -f "$tmp"
+
+  as_root "$cli" -e "DROP DATABASE IF EXISTS test" >/dev/null 2>&1 || true
+  as_root "$cli" -e "DELETE FROM mysql.db WHERE Db = 'test' OR Db = 'test\\_%'" >/dev/null 2>&1 || true
+  as_root "$cli" -e "FLUSH PRIVILEGES" >/dev/null 2>&1 || true
+
+  if as_root "$cli" -N -e "SELECT 1" >/dev/null 2>&1; then
+    echo "mariadb: local socket OK after secure"
+  else
+    echo "note: mariadb socket failed after secure — check /var/log/mysql/error.log" >&2
+  fi
+}
+
 tune_logrotate() {
   body="$STARDUST/state/tasks.log
 $STARDUST/state/backup-all.log
@@ -1061,9 +1205,7 @@ bootstrap_deps() {
     echo "note: goaccess installed — run: goaccess /var/log/apache2/access.log"
   fi
 
-  if have smartd || [ -x /etc/init.d/smartd ] || [ -x /etc/init.d/smartmontools ]; then
-    svc_start smartd 2>/dev/null || svc_start smartmontools 2>/dev/null || true
-  fi
+  start_smartd
   if have irqbalance || [ -x /etc/init.d/irqbalance ]; then
     svc_start irqbalance
   fi
@@ -1142,11 +1284,15 @@ install_prompt() {
   q=$1
   def=${2:-}
   help=${3:-}
+  needed=${4:-}
   while :; do
     if [ -n "$help" ]; then
       printf '%s  (? help)\n' "$q" >&2
     else
       printf '%s\n' "$q" >&2
+    fi
+    if [ -n "$needed" ]; then
+      printf '%s\n' "$needed" >&2
     fi
     if [ -n "$def" ]; then
       printf '> [%s]: ' "$def" >&2
@@ -1156,9 +1302,25 @@ install_prompt() {
     IFS= read -r ans || ans=
     case $ans in
       \?|help|HELP)
-        printf '\n%s\n\n' "$help"
-        printf 'Enter to return to the question... ' >&2
-        IFS= read -r _ || true
+        # Help must not go to stdout — callers capture this function with $().
+        pager=""
+        if [ -t 2 ]; then
+          if command -v sensible-pager >/dev/null 2>&1; then
+            pager=sensible-pager
+          elif command -v less >/dev/null 2>&1; then
+            pager="less -F -X -E"
+          elif command -v more >/dev/null 2>&1; then
+            pager=more
+          fi
+        fi
+        if [ -n "$help" ] && [ -n "$pager" ]; then
+          printf '%s\n\nType q to close this help and return to the question.\n' "$help" | $pager >&2 \
+            || printf '%s\n' "$help" >&2
+        elif [ -n "$help" ]; then
+          printf '\n%s\n\n' "$help" >&2
+        else
+          echo "(no extra help for this question)" >&2
+        fi
         continue
         ;;
     esac
@@ -1236,10 +1398,12 @@ maybe_gitea_defaults() {
   fi
   host=$(install_prompt "Git SSH host — name in git@HOST:org/repo.git" "$host_def" \
     "Accept the scanned default. This is usually a Host line in ~/.ssh/config.
-Empty host skips git template. Type ? here for this text again.")
+Empty host skips git template. Type ? here for this text again." \
+    "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
   owner=$(install_prompt "Git owner/org — first path after the colon" "" \
     "On Gitea this is the organization or your username.
-Template becomes git@HOST:OWNER/%s.git  (%s = platform name).")
+Template becomes git@HOST:OWNER/%s.git  (%s = platform name)." \
+    "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git). Empty skips.")
   if [ -z "$owner" ]; then
     echo "no owner — leave STARDUST_GIT_TEMPLATE empty"
     return 0
@@ -1476,7 +1640,7 @@ fi
 if [ -z "$HUMAN" ]; then
   echo "note: no invoking login to add to Stardust groups (pass -H NAME)"
 else
-  echo "operator login: $HUMAN (groups only: $GROUP,stardust,$OWNER — not sudo)"
+  echo "operator login: $HUMAN (groups: $GROUP,stardust,$OWNER,adm — not sudo)"
 fi
 
 HOSTN=$(hostname 2>/dev/null || echo unknown)

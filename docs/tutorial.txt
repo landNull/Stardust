@@ -277,7 +277,7 @@ Pick ONE profile. Preview, then run for real.
 What every profile does
   creates system account deploy (HOME /srv/stardust/home, nologin) and group www-admin
   no user named www-admin unless you pass -a NAME (NAME != www-admin)
-  puts invoking login in www-admin,stardust,deploy only — never group sudo
+  puts invoking login in www-admin,stardust,deploy,adm — never group sudo
   www-data in www-admin
   /srv/stardust + /srv/platforms 2770 deploy:www-admin + default ACL
   secrets dir 0750 deploy:stardust; deploy HOME 0700 deploy:deploy (no ACL inherit)
@@ -292,6 +292,7 @@ What every profile does
   unattended-upgrades (security pocket, Automatic-Reboot false)
   needrestart, msmtp-mta (put /etc/msmtprc before NOTIFY= works)
   MariaDB bind 127.0.0.1; root stays unix_socket (do not SET PASSWORD)
+    STEP 40 also: load auth_socket, drop anonymous + remote root + test DB
   git safe.directory /srv/platforms for deploy
   sudoers: deploy + %www-admin get NOPASSWD stardust-priv / bee+git+crdir as deploy
              (no usermod -aG sudo; no per-user sudoers line)
@@ -304,6 +305,54 @@ After any profile
   # deploy forge key: /srv/stardust/home/.ssh  (not /home/deploy)
 
 The installer does not set passwords and does not invent keys.
+
+--------------------------------------------------------------------
+2e. Gitea (optional STEP 60)
+--------------------------------------------------------------------
+
+The last install phase asks whether to put a Git forge on THIS host.
+Every question prints a one-line "Needed:" description and "(? help)".
+Type ? or help for a pager with examples aimed at a new sysadmin. q
+closes the pager and returns to the prompt. Enter keeps the default
+in [brackets].
+
+Install Gitea on this host?  (Y/n)
+  Y on devel / --localhost if you do not already have a forge.
+  n on test/live (those hosts clone FROM the forge).
+  n if the forge is GitHub landNull or Gitea on another machine.
+
+It will NOT:
+  download HTML from https://gitea.com (binary comes from dl.gitea.com,
+  sha256 checked, GitHub releases as fallback)
+  rewrite an existing /etc/gitea/app.ini
+  fail the rest of Stardust if you skip it
+
+It WILL, if you say Y and app.ini is absent:
+  create system user git, dirs under /var/lib/gitea and /etc/gitea
+  install /usr/local/bin/gitea
+  write app.ini (INSTALL_LOCK=true, default branch devel,
+    registration closed)
+  sysvinit script (systemd/openrc when that is init)
+  optional Apache vhost stardust-gitea (http://HOSTNAME/ → :3000)
+  a Gitea admin user
+  STARDUST_GIT_TEMPLATE=git@HOST:OWNER/%s.git in /etc/stardust.conf
+  SSH config Host alias (gitea-starhq) so deploy can git ls-remote
+
+Non-interactive (no TTY): skipped unless GITEA_INSTALL=Y. Optional
+env: GITEA_DOMAIN GITEA_OWNER GITEA_SSH_HOST GITEA_ADMIN
+GITEA_ADMIN_EMAIL GITEA_ADMIN_PASS GITEA_DB=sqlite3|mysql
+GITEA_PROXY=Y|n GITEA_SSH=system|gitea GITEA_VERSION=1.27.3
+GITEA_SSH_PORT=2222 GITEA_HTTP_PORT=3000
+
+After a yes:
+
+  browse ROOT_URL, sign in as the admin you named
+  create the organization you put in the owner/org prompt
+  add deploy's printed public key as a deploy key on that org
+  sudo -u deploy git ls-remote git@gitea-starhq:ORG/ecom.git
+
+Re-run of install-stardust.sh is safe: existing Gitea + app.ini
+are left alone; only a missing STARDUST_GIT_TEMPLATE is prompted.
 
 --------------------------------------------------------------------
 3. Prove the box is ready

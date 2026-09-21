@@ -36,13 +36,13 @@ Do **not** run `usermod` again unless `id` after `exec su -` still lacks
 
 Noise from the last run. None of these block doctor once groups refresh.
 
-- [ ] Ignore `smartd failed` on the VM (no useful SMART devices)
+- [x] smartd: scan first; yellow "No SMART devices found" instead of red fail
 - [ ] Ignore `mariadb not answering…` when the next line is `already running`
 - [ ] Leave `/etc/stardust.conf` as-is unless `stardust env` shows a stale
       `ADMIN=www-admin` that doctor should treat as group-only (runtime already does)
 - [ ] Optional: copy `/etc/msmtprc.example` → `/etc/msmtprc` only when NOTIFY= mail is wanted
 - [ ] Optional: `stardust-tui` is absent until someone builds `tui/`
-- [ ] Gitea skipped — set `STARDUST_GIT_TEMPLATE` when the forge exists
+- [x] Gitea STEP 60 — prompts + optional binary (never homepage, never rewrite app.ini)
 
 ---
 
@@ -91,13 +91,19 @@ Do this only after Milestone 0 is READY.
 
 ## Milestone 4 — Git forge
 
-STEP 60 skipped: no Gitea on this host.
+STEP 60 (`apps/gitea/install.sh`) now installs Gitea when you say Y
+and the binary is missing. It never rewrites an existing app.ini and
+never fetches the Gitea homepage. `?` / `help` on each prompt opens
+new-sysadmin help.
 
-- [ ] Decide where platforms live (Gitea on knarr, or GitHub `landNull`)
-- [ ] Set `STARDUST_GIT_TEMPLATE` in `/etc/stardust.conf`
-      (`git@HOST:org/%s.git`)
+- [ ] On devel: re-run `./install-stardust.sh -m devel` and answer the
+      Gitea prompts (or n if the forge lives on GitHub / another host)
+- [ ] Set `STARDUST_GIT_TEMPLATE` (`git@HOST:org/%s.git`) if the
+      installer did not (already-configured templates are skipped)
 - [ ] Put deploy’s *outbound* forge key in the account’s HOME `.ssh`
-      (this VM: `/home/deploy/.ssh` until Milestone 2 conversion)
+      (this VM: `/home/deploy/.ssh` until Milestone 2 conversion;
+      the installer writes `/srv/stardust/home/.ssh/id_ed25519` on
+      new hosts and prints the .pub)
 - [ ] `sudo -u deploy git ls-remote` against one platform URL
 
 ---

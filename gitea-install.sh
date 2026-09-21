@@ -1,4 +1,9 @@
 #!/bin/bash
+# Standalone leftover. Source of truth is apps/gitea/install.sh
+# (install-stardust.sh STEP 60). Prefer that: prompts, sha256,
+# sysvinit/systemd/openrc, never rewrites app.ini, never fetches
+# the Gitea homepage.
+#
 # Automated Gitea installation script for Linux (SysVinit or systemd)
 
 set -e

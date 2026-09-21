@@ -116,6 +116,16 @@ cmd_doctor() {
   if have crdir; then ok "crdir $(command -v crdir)"; else bad "crdir not on PATH"; fail=1; fi
   if have newfeature; then ok "newfeature $(command -v newfeature)"; else note "newfeature not on PATH"; fi
   if have git; then ok "git"; else bad "git missing"; fail=1; fi
+  if have gitea || [ -x /usr/local/bin/gitea ] || [ -x /usr/bin/gitea ]; then
+    ok "gitea $(command -v gitea 2>/dev/null || echo /usr/local/bin/gitea)"
+  else
+    note "gitea not on this host (forge may be elsewhere — optional STEP 60)"
+  fi
+  if git_template_ok "${STARDUST_GIT_TEMPLATE:-}"; then
+    ok "git template $STARDUST_GIT_TEMPLATE"
+  else
+    note "STARDUST_GIT_TEMPLATE empty — platform-add falls back to bee dl-core"
+  fi
   if [ -x /usr/local/sbin/stardust-priv ]; then ok "stardust-priv"; else note "stardust-priv missing"; fi
   if have setfacl; then ok "setfacl"; else note "acl package missing"; fi
   if have getfacl && [ -d "$PLATFORMS" ]; then
