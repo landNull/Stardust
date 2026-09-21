@@ -9,7 +9,7 @@ Do not commit `/srv/platforms` or `/srv/stardust/state/secrets`.
 ## Layout
 
 ```
-apps/                 one directory per app (host, apache, php, bee, …)
+apps/                 one directory per app (host, apache, php, bee, gitea, …)
 apps/MANIFEST         host-install order
 install-stardust.sh   orchestrator — sources apps/<name>/install.sh
 modules/              compatibility shims → apps/*/install.sh

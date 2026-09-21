@@ -12,7 +12,7 @@ Host install order is `apps/MANIFEST`, not filename sort.
 | mariadb | `apps/mariadb/install.sh` | `bd_*` via stardust-priv |
 | deploy | `apps/deploy/install.sh` | ship tools, cron, state |
 | bee | `apps/bee/install.sh` | `apps/bee/lib.sh` → `stardust bee` |
-| gitea | `apps/gitea/install.sh` | prompt only |
+| gitea | `apps/gitea/install.sh` | optional binary + app.ini (absent only) + git template |
 | platform | — | `lib/platform.sh` `lib/promote.sh` |
 | site | — | `lib/site.sh` backup clone check ops |
 | doctor | — | `lib/doctor.sh` |

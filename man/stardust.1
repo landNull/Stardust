@@ -172,7 +172,17 @@ Default: the role in
 .BR devel ).
 .PP
 With no
-.B \-\-git ,
+.B \-\-git
+and a usable
+.B STARDUST_GIT_TEMPLATE
+(written by
+.B install-stardust.sh
+STEP 60),
+the URL is the template with
+.B %s
+replaced by
+.IR NAME .
+Otherwise
 .B bee dl-core web
 builds a fresh Backdrop tree.
 If the directory already exists, the command stops and leaves it alone.

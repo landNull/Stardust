@@ -1142,11 +1142,15 @@ install_prompt() {
   q=$1
   def=${2:-}
   help=${3:-}
+  needed=${4:-}
   while :; do
     if [ -n "$help" ]; then
       printf '%s  (? help)\n' "$q" >&2
     else
       printf '%s\n' "$q" >&2
+    fi
+    if [ -n "$needed" ]; then
+      printf '%s\n' "$needed" >&2
     fi
     if [ -n "$def" ]; then
       printf '> [%s]: ' "$def" >&2
@@ -1156,9 +1160,25 @@ install_prompt() {
     IFS= read -r ans || ans=
     case $ans in
       \?|help|HELP)
-        printf '\n%s\n\n' "$help"
-        printf 'Enter to return to the question... ' >&2
-        IFS= read -r _ || true
+        # Help must not go to stdout — callers capture this function with $().
+        pager=""
+        if [ -t 2 ]; then
+          if command -v sensible-pager >/dev/null 2>&1; then
+            pager=sensible-pager
+          elif command -v less >/dev/null 2>&1; then
+            pager="less -F -X -E"
+          elif command -v more >/dev/null 2>&1; then
+            pager=more
+          fi
+        fi
+        if [ -n "$help" ] && [ -n "$pager" ]; then
+          printf '%s\n\nType q to close this help and return to the question.\n' "$help" | $pager >&2 \
+            || printf '%s\n' "$help" >&2
+        elif [ -n "$help" ]; then
+          printf '\n%s\n\n' "$help" >&2
+        else
+          echo "(no extra help for this question)" >&2
+        fi
         continue
         ;;
     esac
@@ -1236,10 +1256,12 @@ maybe_gitea_defaults() {
   fi
   host=$(install_prompt "Git SSH host — name in git@HOST:org/repo.git" "$host_def" \
     "Accept the scanned default. This is usually a Host line in ~/.ssh/config.
-Empty host skips git template. Type ? here for this text again.")
+Empty host skips git template. Type ? here for this text again." \
+    "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
   owner=$(install_prompt "Git owner/org — first path after the colon" "" \
     "On Gitea this is the organization or your username.
-Template becomes git@HOST:OWNER/%s.git  (%s = platform name).")
+Template becomes git@HOST:OWNER/%s.git  (%s = platform name)." \
+    "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git). Empty skips.")
   if [ -z "$owner" ]; then
     echo "no owner — leave STARDUST_GIT_TEMPLATE empty"
     return 0

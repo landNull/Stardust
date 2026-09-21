@@ -1,0 +1,10 @@
+apps/gitea/install.sh
+modules/60-gitea.sh
+gitea-install.sh          standalone leftover — module is source of truth
+verbs: none (host install phase only)
+install: optional Gitea binary from dl.gitea.com (never the homepage)
+         /etc/gitea/app.ini written only when absent
+         STARDUST_GIT_TEMPLATE in /etc/stardust.conf
+rule: do not rewrite an existing app.ini
+rule: do not wget https://gitea.com
+prompts: short question + one-line "Needed:" + (? / help) long new-sysadmin examples
