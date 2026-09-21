@@ -102,6 +102,7 @@ $PROG 0.4.0 — manage Backdrop platforms and sites from the shell
                     (+ .cnf for mysql --defaults-extra-file; Apache cannot read)
   groups            required: www-admin stardust
                     recommended: adm deploy
+                    adm = read /var/log (not sudo); installer adds it
                     refresh: exec su - $USER   (exec bash does NOT work)
   sudo              refused if you prefix this wrapper. Root work is
                     /usr/local/sbin/stardust-priv only.
