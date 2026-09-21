@@ -1073,13 +1073,15 @@ bootstrap_deps() {
 
   age_key=$STARDUST/state/secrets/age.key
   if have age-keygen; then
-    if [ -f "$age_key" ]; then
+    # secrets/ is 0750 deploy:stardust. The invoking shell may not
+    # have the new groups yet, so [ -f ] as $HUMAN is a false miss.
+    if as_root test -f "$age_key"; then
       echo "age: $age_key exists (unchanged)"
     elif [ "$DRYRUN" -eq 1 ]; then
       echo "+ age-keygen -o $age_key"
     else
       as_root mkdir -p "$STARDUST/state/secrets"
-      as_root age-keygen -o "$age_key" >/dev/null
+      as_root age-keygen -o "$age_key"
       as_root chown "$OWNER:stardust" "$age_key"
       as_root chmod 0640 "$age_key"
       echo "age: wrote $age_key"
