@@ -32,6 +32,9 @@ system:
   deploy     system account. Owns Git trees and runs Bee.
              HOME /srv/stardust/home, shell nologin, locked password.
              sudo -u deploy bee|git|crdir. Not a human login.
+  gitea      system account that *runs* the forge (STEP 60), same method
+             as deploy: nologin, locked, HOME /var/lib/gitea. Not /home/git.
+             git@ in clone URLs is SSH_USER, not this Unix user.
   www-admin  file group on every tree. Not a login.
              Grant: usermod -aG www-admin,stardust,deploy NAME
              The installer adds the invoking login to those three
@@ -328,21 +331,22 @@ It will NOT:
   fail the rest of Stardust if you skip it
 
 It WILL, if you say Y and app.ini is absent:
-  create system user git, dirs under /var/lib/gitea and /etc/gitea
+  create system user gitea (nologin, locked, HOME /var/lib/gitea — like deploy)
+  no /home/git, no Linux login named git; git@ in URLs is SSH_USER
   install /usr/local/bin/gitea
   write app.ini (INSTALL_LOCK=true, default branch devel,
-    registration closed)
+    registration closed, Gitea SSH on 2222)
   sysvinit script (systemd/openrc when that is init)
   optional Apache vhost stardust-gitea (http://HOSTNAME/ → :3000)
   a Gitea admin user
   STARDUST_GIT_TEMPLATE=git@HOST:OWNER/%s.git in /etc/stardust.conf
-  SSH config Host alias (gitea-starhq) so deploy can git ls-remote
+  SSH config Host alias (gitea-starhq, Port 2222) so deploy can git ls-remote
 
 Non-interactive (cron / no /dev/tty): skipped unless GITEA_INSTALL=Y.
 Theia, sudo, and piped stdin still prompt via /dev/tty when a keyboard
 is attached. Optional env: GITEA_DOMAIN GITEA_OWNER GITEA_SSH_HOST GITEA_ADMIN
 GITEA_ADMIN_EMAIL GITEA_ADMIN_PASS GITEA_DB=sqlite3|mysql
-GITEA_PROXY=Y|n GITEA_SSH=system|gitea GITEA_VERSION=1.27.3
+GITEA_PROXY=Y|n GITEA_SSH=gitea GITEA_VERSION=1.27.3
 GITEA_SSH_PORT=2222 GITEA_HTTP_PORT=3000
 
 After a yes:
