@@ -39,25 +39,25 @@ else
     exit 1
 fi
 
-# --- CREATE GITEA USER ---
-echo "--> Creating dedicated system user 'gitea' (nologin, like deploy)..."
+# --- CREATE GIT USER (nologin, like deploy; no /home/git) ---
+echo "--> Creating dedicated system user 'git' (nologin, like deploy)..."
 echo "    (standalone leftover — prefer apps/gitea/install.sh)"
-if ! id "gitea" &>/dev/null; then
-    sudo useradd --system --shell /usr/sbin/nologin --comment "Gitea forge" \
-        --home-dir /var/lib/gitea --no-create-home gitea
-    sudo passwd -l gitea >/dev/null 2>&1 || true
+if ! id "git" &>/dev/null; then
+    sudo useradd --system --shell /usr/sbin/nologin --comment "Git Version Control" \
+        --home-dir /var/lib/gitea --no-create-home git
+    sudo passwd -l git >/dev/null 2>&1 || true
 else
-    echo "User 'gitea' already exists, skipping creation."
+    echo "User 'git' already exists, skipping creation."
 fi
 
 # --- CREATE DIRECTORIES ---
 echo "--> Building Gitea directory structure..."
 sudo mkdir -p /var/lib/gitea/{custom,data,log}
-sudo chown -R gitea:gitea /var/lib/gitea/
+sudo chown -R git:git /var/lib/gitea/
 sudo chmod -R 750 /var/lib/gitea/
 
 sudo mkdir -p /etc/gitea
-sudo chown root:gitea /etc/gitea
+sudo chown root:git /etc/gitea
 sudo chmod 770 /etc/gitea
 
 # --- DOWNLOAD GITEA BINARY ---
@@ -77,12 +77,12 @@ After=network.target
 [Service]
 RestartSec=2s
 Type=simple
-User=gitea
-Group=gitea
+User=git
+Group=git
 WorkingDirectory=/var/lib/gitea
 ExecStart=/usr/local/bin/gitea web --config /etc/gitea/app.ini
 Restart=always
-Environment=USER=gitea HOME=/var/lib/gitea GITEA_WORK_DIR=/var/lib/gitea
+Environment=USER=git HOME=/var/lib/gitea GITEA_WORK_DIR=/var/lib/gitea
 
 [Install]
 WantedBy=multi-user.target
@@ -104,7 +104,7 @@ elif [ "$INIT_SYSTEM" = "sysvinit" ]; then
 # Description:       Self-hosted Git service
 ### END INIT INFO
 
-GITEA_USER="gitea"
+GITEA_USER="git"
 GITEA_BIN="/usr/local/bin/gitea"
 GITEA_WORK_DIR="/var/lib/gitea"
 GITEA_CONFIG="/etc/gitea/app.ini"

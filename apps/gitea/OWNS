@@ -3,8 +3,8 @@ modules/60-gitea.sh
 gitea-install.sh          standalone leftover — module is source of truth
 verbs: none (host install phase only)
 install: optional Gitea binary from dl.gitea.com (never the homepage)
-         system user gitea (nologin, locked, HOME /var/lib/gitea — like deploy)
-         no Unix login named git; git@ in URLs is SSH_USER
+         system user git (nologin, locked, HOME /var/lib/gitea — like deploy)
+         no /home/git, no login shell; git@ in URLs is SSH_USER
          Gitea's own SSH on 2222 (OpenSSH on 22 stays for humans)
          /etc/gitea/app.ini written only when absent
          STARDUST_GIT_TEMPLATE in /etc/stardust.conf

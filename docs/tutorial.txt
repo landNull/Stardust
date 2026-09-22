@@ -32,9 +32,9 @@ system:
   deploy     system account. Owns Git trees and runs Bee.
              HOME /srv/stardust/home, shell nologin, locked password.
              sudo -u deploy bee|git|crdir. Not a human login.
-  gitea      system account that *runs* the forge (STEP 60), same method
+  git        system account that *runs* the forge (STEP 60), same method
              as deploy: nologin, locked, HOME /var/lib/gitea. Not /home/git.
-             git@ in clone URLs is SSH_USER, not this Unix user.
+             git@ in clone URLs is SSH_USER; sshd never gives this user a shell.
   www-admin  file group on every tree. Not a login.
              Grant: usermod -aG www-admin,stardust,deploy NAME
              The installer adds the invoking login to those three
@@ -331,8 +331,8 @@ It will NOT:
   fail the rest of Stardust if you skip it
 
 It WILL, if you say Y and app.ini is absent:
-  create system user gitea (nologin, locked, HOME /var/lib/gitea — like deploy)
-  no /home/git, no Linux login named git; git@ in URLs is SSH_USER
+  create system user git (nologin, locked, HOME /var/lib/gitea — like deploy)
+  no /home/git, no login shell; git@ in URLs is SSH_USER (Gitea SSH on 2222)
   install /usr/local/bin/gitea
   write app.ini (INSTALL_LOCK=true, default branch devel,
     registration closed, Gitea SSH on 2222)

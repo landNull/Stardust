@@ -13,7 +13,7 @@ echo "STEP 60: Gitea (optional git forge)"
 # git@ in clone URLs is SSH_USER in app.ini — not a Linux login
 # (same idea as git@github.com). That needs Gitea's own SSH listener;
 # OpenSSH-as-git would require a login shell, which we will not give.
-GITEA_USER=gitea
+GITEA_USER=git
 GITEA_HOME=/var/lib/gitea
 GITEA_SSH_USER=git
 
@@ -372,9 +372,9 @@ EXAMPLES
   already have GitHub:      n   (template git@github.com:landNull/%s.git)
 
 What this step will do if you say Y
-  1. Create system user "gitea" (nologin, locked, home /var/lib/gitea)
-     the same way Stardust creates "deploy". No /home/git, no login.
-     git@ in clone URLs is SSH_USER in app.ini, not a Linux account.
+  1. Create system user "git" (nologin, locked, home /var/lib/gitea)
+     the same way Stardust creates "deploy". No /home/git, no login shell.
+     git@ in clone URLs is SSH_USER in app.ini; sshd never logs this user in.
   2. Download the official Gitea *binary* from dl.gitea.com
      (never the gitea.com homepage HTML) and verify its sha256.
   3. Write /etc/gitea/app.ini ONLY if that file does not exist.
@@ -456,17 +456,17 @@ and restart Gitea — we will not touch an existing app.ini to do that.'
 
 GITEA_HELP_SSH='How git clone/push talks to the forge
 
-Stardust does not create a Linux login named "git".
+Unix user "git" is the application account (like deploy):
+  system uid, nologin, locked password, HOME=/var/lib/gitea.
+  No /home/git. You never get a shell as git.
 
-  Unix user "gitea"  — the application account (like deploy):
-                       system uid, nologin, locked password,
-                       HOME=/var/lib/gitea. You never ssh as gitea.
-  git@ in URLs       — SSH_USER in app.ini, the same trick GitHub
-                       uses (git@github.com is not a Linux login).
+git@ in clone URLs is SSH_USER in app.ini — the same trick GitHub
+uses (git@github.com is not a Linux login). It happens to match
+the Unix name. sshd on port 22 never logs this user in.
 
 Gitea listens for git SSH itself (default port 2222). OpenSSH on
-port 22 stays for humans. That is what lets the gitea account stay
-nologin: sshd never logs anyone in as gitea.
+port 22 stays for humans. That is what lets the git account stay
+nologin: sshd never runs a shell as git.
 
   Host gitea-starhq
     HostName git.starhq.knarr
@@ -482,7 +482,7 @@ CSF on a VPS does not open 2222 for you. Allow it from WireGuard
 
 Do not pick "system" / OpenSSH-as-git. That would need a login
 shell on the forge account (sshd runs command= through the shell).
-We will not give gitea a shell.
+We will not give git a shell.
 
 EXAMPLES
   devel VM / laptop:     gitea   (port 2222, Host alias sets Port)
@@ -565,7 +565,7 @@ password in app.ini (Gitea hashes it into its database).
 
 If you lose it and have no mailer:
 
-  sudo -u gitea GITEA_WORK_DIR=/var/lib/gitea \\
+  sudo -u git GITEA_WORK_DIR=/var/lib/gitea \\
     /usr/local/bin/gitea admin user change-password \\
     --config /etc/gitea/app.ini --username YOURUSER --password NEW'
 
@@ -682,7 +682,7 @@ Forgot it? Change it in the Gitea UI after login:
 
 GITEA_HELP_SSH_PORT='Port for Gitea'\''s built-in SSH server
 
-Gitea listens for git clone/push itself so the Unix account "gitea"
+Gitea listens for git clone/push itself so the Unix account "git"
 can stay nologin (like deploy). OpenSSH on 22 is not used for git.
 
   2222     usual pick (does not fight with OpenSSH)
@@ -802,8 +802,8 @@ gitea_ensure_user() {
   user=$GITEA_USER
   home=$GITEA_HOME
   shell=$(gitea_nologin_shell)
-  if id git >/dev/null 2>&1; then
-    echo "note: leftover Unix user git exists — Gitea runs as $user, not git"
+  if id gitea >/dev/null 2>&1; then
+    echo "note: leftover Unix user gitea exists — Gitea runs as $user, not gitea"
   fi
   if id "$user" >/dev/null 2>&1; then
     echo "user ok: $user (existing; not rewriting shell or home)"
@@ -822,7 +822,7 @@ gitea_ensure_user() {
   run_root mkdir -p "$home"
   if [ -n "$adduser_bin" ] && [ "${PKG:-}" = apt ]; then
     run_root "$adduser_bin" --system --home "$home" --shell "$shell" \
-      --disabled-password --group --gecos "Gitea forge" "$user" || {
+      --disabled-password --group --gecos "Git Version Control" "$user" || {
       echo "$PROG: could not create system user $user" >&2
       return 1
     }
@@ -832,7 +832,7 @@ gitea_ensure_user() {
     fi
     if [ -n "$useradd_bin" ]; then
       run_root "$useradd_bin" -r -M -d "$home" -s "$shell" -g "$user" \
-        -c "Gitea forge" "$user" || {
+        -c "Git Version Control" "$user" || {
         echo "$PROG: could not create system user $user" >&2
         return 1
       }
@@ -1075,12 +1075,12 @@ After=network.target
 [Service]
 RestartSec=2s
 Type=simple
-User=gitea
-Group=gitea
+User=git
+Group=git
 WorkingDirectory=/var/lib/gitea
 ExecStart=/usr/local/bin/gitea web --config /etc/gitea/app.ini
 Restart=always
-Environment=USER=gitea HOME=/var/lib/gitea GITEA_WORK_DIR=/var/lib/gitea
+Environment=USER=git HOME=/var/lib/gitea GITEA_WORK_DIR=/var/lib/gitea
 
 [Install]
 WantedBy=multi-user.target
@@ -1102,11 +1102,11 @@ EOF
 name="gitea"
 command="/usr/local/bin/gitea"
 command_args="web --config /etc/gitea/app.ini"
-command_user="gitea:gitea"
+command_user="git:git"
 directory="/var/lib/gitea"
 command_background=true
 pidfile="/run/gitea.pid"
-export USER=gitea
+export USER=git
 export HOME=/var/lib/gitea
 export GITEA_WORK_DIR=/var/lib/gitea
 EOF
@@ -1133,12 +1133,12 @@ EOF
 # Description:       Self-hosted Git service for Stardust
 ### END INIT INFO
 
-GITEA_USER="gitea"
+GITEA_USER="git"
 GITEA_BIN="/usr/local/bin/gitea"
 GITEA_WORK_DIR="/var/lib/gitea"
 GITEA_CONFIG="/etc/gitea/app.ini"
 PIDFILE="/var/run/gitea.pid"
-export USER=gitea
+export USER=git
 export HOME=/var/lib/gitea
 export GITEA_WORK_DIR=/var/lib/gitea
 
@@ -1399,10 +1399,10 @@ gitea_run_phase() {
 
   if [ "${DRYRUN:-0}" -eq 1 ]; then
     echo "+ Gitea missing — would prompt: install on this host? default $inst_def"
-    echo "+ system user gitea (nologin, locked, HOME /var/lib/gitea — like deploy)"
+    echo "+ system user git (nologin, locked, HOME /var/lib/gitea — like deploy)"
     echo "+ prompt: public hostname, Apache proxy, SSH port 2222, database, admin, owner, SSH alias"
     echo "+ download dl.gitea.com (never the Gitea homepage); sha256; /usr/local/bin/gitea"
-    echo "+ write /etc/gitea/app.ini only if absent (RUN_USER=gitea SSH_USER=git START_SSH_SERVER)"
+    echo "+ write /etc/gitea/app.ini only if absent (RUN_USER=git SSH_USER=git START_SSH_SERVER)"
     echo "+ init script + optional Apache vhost stardust-gitea"
     echo "+ STARDUST_GIT_TEMPLATE=git@HOST:OWNER/%s.git"
     gitea_prompt_git_template
@@ -1456,7 +1456,7 @@ gitea_run_phase() {
     [ -n "$proxy" ] || proxy=$(gitea_ask "Put Apache in front of Gitea?  (Y/n)" "Y" "$GITEA_HELP_PROXY" \
       "Needed: Y or n. Y is http://HOSTNAME/ through Apache. n is http://HOSTNAME:3000/ straight to Gitea.")
     [ -n "$ssh_mode" ] || ssh_mode=$(gitea_ask "SSH for git clone/push: gitea (nologin Unix user) or system" "gitea" "$GITEA_HELP_SSH" \
-      "Needed: gitea (recommended — Unix user gitea stays nologin like deploy). system needs a login shell; we will not.")
+      "Needed: gitea (recommended — Unix user git stays nologin like deploy). system needs a login shell; we will not.")
     [ -n "$db_type" ] || db_type=$(gitea_ask "Database: sqlite3 or mysql" "sqlite3" "$GITEA_HELP_DB" \
       "Needed: the word sqlite3 (one file, default) or mysql (MariaDB already on this host).")
     admin_def=${HUMAN:-admin}
