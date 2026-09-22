@@ -1,0 +1,6 @@
+apps/dnsmasq/install.sh
+modules/25-dnsmasq.sh
+install: devel / --localhost only
+         /etc/dnsmasq/dnsmasq.d/wildcards.conf
+         /etc/dnsmasq/dnsmasq.d/tuning.conf
+rule: one printf per line (no literal \\n in directives)
