@@ -1,0 +1,13 @@
+apps/dnsmasq/install.sh
+modules/25-dnsmasq.sh
+verbs: none (host install phase only)
+install: devel / --localhost only
+         /etc/dnsmasq/dnsmasq.d/wildcards.conf   *.devel + *.knarr
+         /etc/dnsmasq/dnsmasq.d/tuning.conf      cache + qemu-safe bind
+         /etc/dnsmasq.d/00-stardust-confdir.conf include the path above
+         /etc/dnsmasq.d/99-stardust-bind.conf    bind-dynamic after libvirt
+         /srv/stardust/state/dnsmasq.hosts       addn-hosts (absent only)
+rule: never on test/live (public DNS)
+rule: DNS only — no dhcp-range (libvirt/qemu keep port 53 on virbr*)
+rule: pin nameserver 127.0.0.1 so knarr can ping the wildcards
+override: DEV_DNS_IP=x.x.x.x
