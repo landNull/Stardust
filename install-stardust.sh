@@ -1247,7 +1247,7 @@ maybe_gitea_defaults() {
     echo "no TTY — not prompting for git template"
     return 0
   fi
-  host_def=gitea-starhq
+  host_def=gitforge
   if [ -f "$HOME/.ssh/config" ]; then
     h=$(awk 'tolower($1)=="host" && $2 !~ /[*?]/ {
       if ($2 ~ /gitea|github|gitlab|git/) { print $2; exit }
@@ -1257,11 +1257,11 @@ maybe_gitea_defaults() {
   host=$(install_prompt "Git SSH host — name in git@HOST:org/repo.git" "$host_def" \
     "Accept the scanned default. This is usually a Host line in ~/.ssh/config.
 Empty host skips git template. Type ? here for this text again." \
-    "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
+    "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitforge.")
   owner=$(install_prompt "Git owner/org — first path after the colon" "" \
     "On Gitea this is the organization or your username.
 Template becomes git@HOST:OWNER/%s.git  (%s = platform name)." \
-    "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git). Empty skips.")
+    "Needed: the org or username after the colon (acme in git@HOST:acme/myapp.git). Empty skips.")
   if [ -z "$owner" ]; then
     echo "no owner — leave STARDUST_GIT_TEMPLATE empty"
     return 0

@@ -322,7 +322,7 @@ in [brackets].
 Install Gitea on this host?  (Y/n)
   Y on devel / --localhost if you do not already have a forge.
   n on test/live (those hosts clone FROM the forge).
-  n if the forge is GitHub landNull or Gitea on another machine.
+  n if the forge is GitHub (example) or Gitea on another machine.
 
 It will NOT:
   download HTML from https://gitea.com (binary comes from dl.gitea.com,
@@ -340,7 +340,7 @@ It WILL, if you say Y and app.ini is absent:
   optional Apache vhost stardust-gitea (http://HOSTNAME/ → :3000)
   a Gitea admin user
   STARDUST_GIT_TEMPLATE=git@HOST:OWNER/%s.git in /etc/stardust.conf
-  SSH config Host alias (gitea-starhq, Port 2222) so deploy can git ls-remote
+  SSH config Host alias (gitforge, Port 2222) so deploy can git ls-remote
 
 Non-interactive (cron / no /dev/tty): skipped unless GITEA_INSTALL=Y.
 Theia, sudo, and piped stdin still prompt via /dev/tty when a keyboard
@@ -354,7 +354,7 @@ After a yes:
   browse ROOT_URL, sign in as the admin you named
   create the organization you put in the owner/org prompt
   add deploy's printed public key as a deploy key on that org
-  sudo -u deploy git ls-remote git@gitea-starhq:ORG/ecom.git
+  sudo -u deploy git ls-remote git@gitforge:acme/myapp.git
 
 Re-run of install-stardust.sh is safe: existing Gitea + app.ini
 are left alone; only a missing STARDUST_GIT_TEMPLATE is prompted.

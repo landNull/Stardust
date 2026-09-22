@@ -264,7 +264,7 @@ ask_git_remote() {
   help_host="Git SSH host
 
 This is the name your machine uses in git@HOST:org/repo.git
-It is often a Host line in ~/.ssh/config (example: gitea-starhq),
+It is often a Host line in ~/.ssh/config (example: gitforge),
 not necessarily a public DNS name.
 
 Stardust scanned this login for SSH config and existing remotes.
@@ -278,17 +278,17 @@ This is the first path component after the colon:
   git@HOST:OWNER/%s.git
 
 On Gitea it is the organization or your username.
-On GitHub it is landNull or an org name.
-%s becomes the platform name (ecom, torg, …).
+On GitHub it is example or an org name.
+%s becomes the platform name (myapp, wiki, …).
 
 q in the pager returns here."
   host=$(prompt_line "Git SSH host — machine name in git@HOST:…" "${scan_host}" "$help_host" \
-    "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
+    "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitforge.")
   if [ -z "$host" ]; then
     return 1
   fi
   owner=$(prompt_line "Git owner/org — first path after the colon" "${scan_owner}" "$help_owner" \
-    "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git).")
+    "Needed: the org or username after the colon (acme in git@HOST:acme/myapp.git).")
   if [ -z "$owner" ]; then
     echo "$PROG: owner/org required for a template" >&2
     return 1

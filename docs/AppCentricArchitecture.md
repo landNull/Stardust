@@ -252,8 +252,8 @@ gitea_installed() { have gitea && return 0; [ -x /usr/local/bin/gitea ] && retur
 
 maybe_gitea_defaults() {
   if [ "\$LOCALHOST" -ne 1 ] && [ "\$ROLE" != "devel" ] || stardust_git_configured || ! gitea_installed; then return 0; fi
-  host_def=gitea-starhq
-  [ -f "\$HOME/.ssh/config" ] && host_def=\$(awk 'tolower(\$1)=="host" && \$2 !~ /[*?]/ { if (\$2 ~ /gitea|github|gitlab|git/) { print \$2; exit } }' "\$HOME/.ssh/config" 2>/dev/null || echo "gitea-starhq")
+  host_def=gitforge
+  [ -f "\$HOME/.ssh/config" ] && host_def=\$(awk 'tolower(\$1)=="host" && \$2 !~ /[*?]/ { if (\$2 ~ /gitea|github|gitlab|git/) { print \$2; exit } }' "\$HOME/.ssh/config" 2>/dev/null || echo "gitforge")
   host=\$(install_prompt "Git SSH host" "\$host_def" "SSH configuration host string.")
   owner=\$(install_prompt "Git owner/org" "" "Username or organization partition name.")
   [ -z "\$owner" ] && return 0

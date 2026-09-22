@@ -263,7 +263,7 @@ gitea_default_domain() {
   case $fqdn in
     git.*) printf '%s\n' "$fqdn" ;;
     *.*)   printf '%s\n' "git.$fqdn" ;;
-    *)     printf '%s\n' "git.starhq.knarr" ;;
+    *)     printf '%s\n' "git.example.com" ;;
   esac
 }
 
@@ -277,7 +277,7 @@ gitea_default_ssh_host() {
       return 0
     fi
   fi
-  printf '%s\n' "gitea-starhq"
+  printf '%s\n' "gitforge"
 }
 
 gitea_rand() {
@@ -349,11 +349,11 @@ GITEA_HELP_INSTALL='Install Gitea on THIS machine?
 Gitea is a self-hosted Git forge — like a private GitHub. Stardust
 clones Backdrop platforms from it:
 
-  git@gitea-starhq:myorg/ecom.git
-  → /srv/platforms/ecom
+  git@gitforge:acme/myapp.git
+  → /srv/platforms/myapp
 
 WHEN TO SAY YES (Y)
-  • This box is the devel host (starhq / knarr / a laptop with --localhost)
+  • This box is the devel host (this machine, or a laptop with --localhost)
     and you do not already have a forge.
   • You want platform-add to clone from a URL you control, not from
     GitHub, and not from a fresh "bee dl-core" tree.
@@ -366,10 +366,10 @@ WHEN TO SAY NO (n)
     step is optional and will not undo Apache/PHP/MariaDB/Bee.
 
 EXAMPLES
-  sd@devuan (devel VM):     Y
+  alice@debian (devel VM):     Y
   laptop  --localhost:      Y   (Gitea on 127.0.0.1, browse git.devel)
   VPS  -m test / -m live:   n   (point STARDUST_GIT_TEMPLATE at the forge)
-  already have GitHub:      n   (template git@github.com:landNull/%s.git)
+  already have GitHub:      n   (template git@github.com:example/%s.git)
 
 What this step will do if you say Y
   1. Create system user "git" (nologin, locked, home /var/lib/gitea)
@@ -407,7 +407,7 @@ HOW RESOLUTION WORKS IN STARDUST
   devel host
       dnsmasq maps *.devel → the host LAN/WG address.
       git.devel is the usual pick. If you have real DNS
-      (git.starhq.knarr), use that instead.
+      (git.example.com), use that instead.
 
   test/live
       use a public name you already created in DNS, e.g. git.example.com.
@@ -415,13 +415,13 @@ HOW RESOLUTION WORKS IN STARDUST
 
 EXAMPLES
   git.devel              laptop / devel, uses dnsmasq
-  git.starhq.knarr       LAN name for the devel VM
-  git.example.com        public VPS with a DNS A record
+  git.lan.example.com    LAN name for the devel VM
+  git.example.com        public name with a DNS A record
 
 Put the name in /etc/hosts on any box that does not use dnsmasq:
 
-  192.168.1.120  git.starhq.knarr
-  10.8.0.1       git.starhq.knarr
+  192.0.2.10      git.lan.example.com
+  192.0.2.11      git.example.com
 
 Wrong: an IP as the hostname (git URLs become ugly and certs will fail).
 Wrong: github.com — that is not *your* forge; skip this install instead.'
@@ -468,14 +468,14 @@ Gitea listens for git SSH itself (default port 2222). OpenSSH on
 port 22 stays for humans. That is what lets the git account stay
 nologin: sshd never runs a shell as git.
 
-  Host gitea-starhq
-    HostName git.starhq.knarr
+  Host gitforge
+    HostName git.example.com
     User git
     Port 2222
     IdentityFile /srv/stardust/home/.ssh/id_ed25519
     IdentitiesOnly yes
 
-  git@gitea-starhq:myorg/ecom.git
+  git@gitforge:acme/myapp.git
 
 CSF on a VPS does not open 2222 for you. Allow it from WireGuard
 10.8.0.0/24 and LAN only — same as you already do for 22.
@@ -528,14 +528,14 @@ a Gitea login, NOT a Linux login. It is not "deploy" and it is not
 
 USERNAME
   Pick something you will type in the browser. Letters, digits,
-  hyphen. "sd" is fine if that is your Linux operator; "admin" is
+  hyphen. "alice" is fine if that is your Linux operator; "admin" is
   fine too. Do not use "deploy" — that name is reserved in your
   head for the system account that runs git/bee.
 
 EMAIL
   Gitea wants an email on the account. It does not have to be a
   real mailbox unless you later enable the mailer. Example:
-  sd@starhq.knarr
+  alice@server1.example.com
 
 PASSWORD
   The next question (hidden). Empty = we generate one, print it
@@ -560,7 +560,7 @@ EXAMPLES
     random password, prints it ONCE, and stores a copy in
     /srv/stardust/state/secrets/gitea-admin.txt (0640 deploy:stardust).
 
-Do not reuse the Linux password for sd/root. Do not put this
+Do not reuse the Linux password for alice/root. Do not put this
 password in app.ini (Gitea hashes it into its database).
 
 If you lose it and have no mailer:
@@ -573,32 +573,32 @@ GITEA_HELP_OWNER='Git owner / organization
 
 This is the first path component after the colon in an SSH URL:
 
-  git@HOST:OWNER/ecom.git
+  git@HOST:OWNER/myapp.git
                  ^^^^^ this
 
 On Gitea it is either:
   • an Organization you will create in the UI (recommended for a
-    team — ecom, torg, stardust all live under one org), or
+    team — myapp, wiki, blog all live under one org), or
   • your Gitea username (fine for a one-person devel box).
 
-On GitHub it is landNull or another org. You can point the
+On GitHub it is example or another org. You can point the
 template at GitHub without installing Gitea — say n to "Install
 Gitea" and still fill this in.
 
 EXAMPLES
-  myorg          →  git@gitea-starhq:myorg/ecom.git
-  sd             →  git@gitea-starhq:sd/ecom.git
-  landNull       →  git@github.com:landNull/ecom.git
+  acme           →  git@gitforge:acme/myapp.git
+  alice          →  git@gitforge:alice/myapp.git
+  example        →  git@github.com:example/myapp.git
 
 Stardust substitutes the platform name for %s:
 
-  STARDUST_GIT_TEMPLATE=git@gitea-starhq:myorg/%s.git
-  stardust platform-add ecom
-    clones git@gitea-starhq:myorg/ecom.git
+  STARDUST_GIT_TEMPLATE=git@gitforge:acme/%s.git
+  stardust platform-add myapp
+    clones git@gitforge:acme/myapp.git
 
 The org does not have to exist yet. Create it in the Gitea UI
 after this installer finishes, then create empty private repos
-named after each platform (ecom, torg, stardust, …).
+named after each platform (myapp, wiki, blog, …).
 
 Empty answer: skip the template. platform-add will fall back to
 bee dl-core + git init until you set STARDUST_GIT_TEMPLATE in
@@ -610,24 +610,24 @@ This is the HOST in git@HOST:org/repo.git — usually a Host line in
 SSH config, NOT necessarily public DNS.
 
 Why an alias?
-  git@git.starhq.knarr:myorg/ecom.git  works only if:
+  git@git.example.com:acme/myapp.git  works only if:
     • that name resolves, AND
     • your SSH key is offered, AND
     • (for built-in SSH) you remember Port 2222.
   An alias pins all of that in one place:
 
-    Host gitea-starhq
-      HostName git.starhq.knarr    # or 127.0.0.1 on --localhost
+    Host gitforge
+      HostName git.example.com    # or 127.0.0.1 on --localhost
       User git
       IdentityFile /srv/stardust/home/.ssh/id_ed25519
       IdentitiesOnly yes
       # Port 2222                  # only if you chose "gitea" SSH
 
-  Then the URL is always git@gitea-starhq:myorg/ecom.git
-  and STARDUST_GIT_TEMPLATE=git@gitea-starhq:myorg/%s.git
+  Then the URL is always git@gitforge:acme/myapp.git
+  and STARDUST_GIT_TEMPLATE=git@gitforge:acme/%s.git
 
 EXAMPLES
-  gitea-starhq     Stardust default, scanned from ~/.ssh/config
+  gitforge     Stardust default, scanned from ~/.ssh/config
   git.devel        fine if that name already resolves and you
                    do not need extra SSH options
   github.com       if the forge is GitHub, not Gitea
@@ -670,8 +670,8 @@ unless you later turn on [mailer] in app.ini (Stardust leaves the
 mailer off).
 
 EXAMPLES
-  sd@starhq.knarr     matches the devel operator
-  sd@git.devel        fine on --localhost; need not exist in DNS
+  alice@server1.example.com     matches the devel operator
+  alice@git.devel        fine on --localhost; need not exist in DNS
   you@example.com     if you will enable the mailer later
 
 Wrong: leaving it empty — Gitea admin user create wants an address.
@@ -690,18 +690,18 @@ can stay nologin (like deploy). OpenSSH on 22 is not used for git.
 
 URLs Gitea prints look like:
 
-  ssh://git@HOSTNAME:2222/myorg/ecom.git
+  ssh://git@HOSTNAME:2222/acme/myapp.git
 
 The Host alias we write hides the port:
 
-  Host gitea-starhq
-    HostName git.starhq.knarr
+  Host gitforge
+    HostName git.example.com
     User git
     Port 2222
     IdentityFile /srv/stardust/home/.ssh/id_ed25519
     IdentitiesOnly yes
 
-  git@gitea-starhq:myorg/ecom.git     still works (alias sets Port)
+  git@gitforge:acme/myapp.git     still works (alias sets Port)
 
 "User git" here is SSH_USER, not a Linux account.
 
@@ -761,7 +761,7 @@ gitea_prompt_git_template() {
   echo "Empty host or empty owner skips the clone template."
   if [ -z "$env_host" ]; then
     host=$(gitea_ask "Git SSH host alias — HOST in git@HOST:org/repo.git" "$host_def" "$GITEA_HELP_SSH_HOST" \
-      "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
+      "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitforge.")
   else
     host=$env_host
   fi
@@ -771,7 +771,7 @@ gitea_prompt_git_template() {
   fi
   if [ -z "$env_owner" ]; then
     owner=$(gitea_ask "Git owner/org — first path after the colon" "" "$GITEA_HELP_OWNER" \
-      "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git). Empty skips.")
+      "Needed: the org or username after the colon (acme in git@HOST:acme/myapp.git). Empty skips.")
   else
     owner=$env_owner
   fi
@@ -1452,7 +1452,7 @@ gitea_run_phase() {
     [ -n "$ver" ] || ver=$(gitea_ask "Gitea version to download" "$ver_def" "$GITEA_HELP_VERSION" \
       "Needed: a three-part version (1.27.3). Not a URL, not latest. Enter keeps the default.")
     [ -n "$domain" ] || domain=$(gitea_ask "Public hostname for the forge  (browser + git SSH)" "$(gitea_default_domain)" "$GITEA_HELP_DOMAIN" \
-      "Needed: a hostname that resolves here (git.devel, git.starhq.knarr). Not an IP.")
+      "Needed: a hostname that resolves here (git.devel, git.example.com). Not an IP.")
     [ -n "$proxy" ] || proxy=$(gitea_ask "Put Apache in front of Gitea?  (Y/n)" "Y" "$GITEA_HELP_PROXY" \
       "Needed: Y or n. Y is http://HOSTNAME/ through Apache. n is http://HOSTNAME:3000/ straight to Gitea.")
     [ -n "$ssh_mode" ] || ssh_mode=$(gitea_ask "SSH for git clone/push: gitea (nologin Unix user) or system" "gitea" "$GITEA_HELP_SSH" \
@@ -1469,9 +1469,9 @@ gitea_run_phase() {
         "Needed: the password you will type at the Gitea web login. Empty generates one and shows it once.")
     fi
     [ -n "$ssh_host" ] || ssh_host=$(gitea_ask "Git SSH host alias — HOST in git@HOST:org/repo.git" "$(gitea_default_ssh_host)" "$GITEA_HELP_SSH_HOST" \
-      "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
+      "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitforge.")
     [ -n "$owner" ] || owner=$(gitea_ask "Git owner/org — first path after the colon" "" "$GITEA_HELP_OWNER" \
-      "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git). Empty skips the clone template.")
+      "Needed: the org or username after the colon (acme in git@HOST:acme/myapp.git). Empty skips the clone template.")
   else
     [ -n "$ver" ] || ver=$ver_def
     [ -n "$domain" ] || domain=$(gitea_default_domain)
