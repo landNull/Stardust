@@ -1,12 +1,14 @@
 #!/bin/sh
 # apps/dnsmasq/install.sh — STEP 25. devel / --localhost only.
 # Conf files are written with one printf per line. Never embed \\n in a directive.
+# DHCP is off. Starlink and qemu keep their own lease servers.
 
-echo "STEP 25: dnsmasq (*.devel / *.knarr, QEMU-safe bind, cache)"
+echo "STEP 25: dnsmasq (*.devel / *.knarr, QEMU-safe bind, cache, no DHCP)"
 
 DNSMASQ_CONFDIR=/etc/dnsmasq/dnsmasq.d
 DNSMASQ_WILDCARDS=$DNSMASQ_CONFDIR/wildcards.conf
 DNSMASQ_TUNING=$DNSMASQ_CONFDIR/tuning.conf
+DNSMASQ_NODHCP=$DNSMASQ_CONFDIR/nodhcp.conf
 DNSMASQ_HOSTS=${STARDUST:-/srv/stardust}/state/dnsmasq.hosts
 DNSMASQ_INCLUDE=/etc/dnsmasq.d/00-stardust-confdir.conf
 DNSMASQ_BIND=/etc/dnsmasq.d/99-stardust-bind.conf
@@ -113,6 +115,30 @@ dns_write_wildcards() {
   } | write_dropin "$DNSMASQ_WILDCARDS"
 }
 
+dns_write_nodhcp() {
+  {
+    printf '%s\n' "# Stardust — DNS only. Do not serve DHCP."
+    printf '%s\n' "port=53"
+    printf '%s\n' "no-dhcp-interface=*"
+    if have ip; then
+      ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1 | while read -r ifc; do
+        [ -n "$ifc" ] || continue
+        printf 'no-dhcp-interface=%s\n' "$ifc"
+      done
+    fi
+  } | write_dropin "$DNSMASQ_NODHCP"
+  if [ "$DRYRUN" -eq 1 ]; then return 0; fi
+  for f in /etc/dnsmasq.conf /etc/dnsmasq.d/*.conf; do
+    [ -f "$f" ] || continue
+    grep -q '^[[:space:]]*dhcp-range=' "$f" 2>/dev/null || continue
+    tmp=$(mktemp)
+    sed 's/^[[:space:]]*dhcp-range=/# stardust-nodhcp &/' "$f" > "$tmp"
+    as_root install -m 0644 "$tmp" "$f"
+    rm -f "$tmp"
+    echo "commented dhcp-range in $f"
+  done
+}
+
 dns_write_tuning() {
   servers=$(dns_upstream_servers)
   listen=$(dns_listen_ips)
@@ -123,6 +149,7 @@ dns_write_tuning() {
   {
     printf '%s\n' "# Stardust dnsmasq tuning"
     printf '%s\n' "bind-dynamic"
+    printf '%s\n' "port=53"
     for a in $listen_uniq; do
       [ -n "$a" ] || continue
       printf 'listen-address=%s\n' "$a"
@@ -220,7 +247,8 @@ echo "wildcard target: *.devel *.knarr → $target"
 dns_write_includes
 dns_write_wildcards "$target"
 dns_write_tuning "$target"
+dns_write_nodhcp
 dns_write_hosts_file
 dns_pin_resolv
 dns_test_and_start
-echo "dnsmasq: $DNSMASQ_WILDCARDS → $target"
+echo "dnsmasq: $DNSMASQ_WILDCARDS → $target (DHCP off)"
