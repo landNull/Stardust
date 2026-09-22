@@ -25,12 +25,80 @@ gitea_conf_path() {
   return 1
 }
 
-gitea_installed() {
-  have gitea && return 0
-  [ -x /usr/local/bin/gitea ] && return 0
-  [ -x /usr/bin/gitea ] && return 0
-  gitea_conf_path >/dev/null && return 0
+gitea_bin_path() {
+  # A runnable gitea binary. PATH last — "have gitea" can be a wrapper.
+  for b in /usr/local/bin/gitea /usr/bin/gitea /home/git/gitea/gitea; do
+    if [ -x "$b" ]; then
+      printf '%s\n' "$b"
+      return 0
+    fi
+  done
+  if have gitea; then
+    command -v gitea
+    return 0
+  fi
   return 1
+}
+
+gitea_installed() {
+  # Binary present = installed. app.ini alone is leftover config, not an install.
+  gitea_bin_path >/dev/null
+}
+
+gitea_report_status() {
+  # Always print what we found. Return 0 only when a binary exists.
+  bin=$(gitea_bin_path || true)
+  gc=$(gitea_conf_path || true)
+  if [ -n "$bin" ]; then
+    echo "Gitea binary: $bin"
+    if [ -n "$gc" ]; then
+      echo "Gitea config: $gc (will not rewrite)"
+    else
+      echo "Gitea config: none yet (app.ini will be written on install)"
+    fi
+    return 0
+  fi
+  if [ -n "$gc" ]; then
+    echo "Gitea not installed: no binary (looked in /usr/local/bin /usr/bin PATH)"
+    echo "Gitea leftover config: $gc (will not rewrite if you say Y)"
+    return 1
+  fi
+  echo "Gitea not installed: no binary, no app.ini"
+  echo "  looked for: /usr/local/bin/gitea, /usr/bin/gitea, gitea on PATH,"
+  echo "              /etc/gitea/app.ini and the other usual conf paths"
+  return 1
+}
+
+gitea_can_prompt() {
+  # Keyboard available? Theia / sudo / piped stdin often fail [ -t 0 ]
+  # even though /dev/tty is the terminal you are looking at.
+  [ -t 0 ] && return 0
+  [ -e /dev/tty ] && [ -r /dev/tty ] && [ -w /dev/tty ] && return 0
+  return 1
+}
+
+gitea_read_line() {
+  # Set ans from the keyboard. Prefer a real stdin TTY; else /dev/tty.
+  ans=
+  if [ -t 0 ]; then
+    IFS= read -r ans || ans=
+    return 0
+  fi
+  if [ -r /dev/tty ]; then
+    IFS= read -r ans </dev/tty || ans=
+    return 0
+  fi
+  return 1
+}
+
+gitea_stty() {
+  if [ -t 0 ]; then
+    stty "$@" 2>/dev/null || true
+    return 0
+  fi
+  if [ -e /dev/tty ]; then
+    stty "$@" </dev/tty 2>/dev/null || true
+  fi
 }
 
 stardust_git_configured() {
@@ -74,7 +142,7 @@ Press Enter at the prompt to keep the default in [brackets]."
   else
     printf '%s\n' "$text" >&2
     printf 'Press Enter to continue... ' >&2
-    IFS= read -r _ || true
+    gitea_read_line || true
   fi
 }
 
@@ -100,7 +168,7 @@ gitea_ask() {
     else
       printf '> ' >&2
     fi
-    IFS= read -r ans || ans=
+    gitea_read_line || ans=
     case $ans in
       \?|help|HELP)
         gitea_help_show "$help"
@@ -130,11 +198,11 @@ gitea_ask_secret() {
     fi
     printf '> (hidden, empty = generate): ' >&2
     if command -v stty >/dev/null 2>&1; then
-      stty -echo 2>/dev/null || true
+      gitea_stty -echo
     fi
-    IFS= read -r ans || ans=
+    gitea_read_line || ans=
     if command -v stty >/dev/null 2>&1; then
-      stty echo 2>/dev/null || true
+      gitea_stty echo
     fi
     printf '\n' >&2
     case $ans in
@@ -673,8 +741,8 @@ gitea_prompt_git_template() {
     echo "+ prompt STARDUST_GIT_TEMPLATE (host + owner/org)"
     return 0
   fi
-  if [ ! -t 0 ]; then
-    echo "no TTY — not prompting for git template (set STARDUST_GIT_TEMPLATE in /etc/stardust.conf)"
+  if ! gitea_can_prompt; then
+    echo "no keyboard — not prompting for git template (set STARDUST_GIT_TEMPLATE in /etc/stardust.conf)"
     return 0
   fi
   host_def=${env_host:-$(gitea_default_ssh_host)}
@@ -1277,9 +1345,10 @@ gitea_store_admin_pass() {
 # --- main phase ------------------------------------------------------------
 
 gitea_run_phase() {
-  if gitea_installed; then
-    gc=$(gitea_conf_path || true)
-    echo "Gitea already present${gc:+ ($gc)} — will not download a binary or rewrite app.ini"
+  echo "checking whether Gitea is installed on this host"
+
+  if gitea_report_status; then
+    echo "Gitea is installed — will not download a binary or rewrite app.ini"
     gitea_prompt_git_template
     return 0
   fi
@@ -1291,7 +1360,7 @@ gitea_run_phase() {
   env_inst=$(gitea_env GITEA_INSTALL)
 
   if [ "${DRYRUN:-0}" -eq 1 ]; then
-    echo "+ prompt: install Gitea on this host? default $inst_def"
+    echo "+ Gitea missing — would prompt: install on this host? default $inst_def"
     echo "+ prompt: public hostname, Apache proxy, SSH mode, database, admin, owner, SSH alias"
     echo "+ download dl.gitea.com (never the Gitea homepage); sha256; /usr/local/bin/gitea"
     echo "+ write /etc/gitea/app.ini only if absent"
@@ -1301,14 +1370,19 @@ gitea_run_phase() {
     return 0
   fi
 
-  if [ ! -t 0 ] && [ -z "$env_inst" ]; then
-    echo "no TTY — skip Gitea install (GITEA_INSTALL=Y to force, or set STARDUST_GIT_TEMPLATE later)"
+  if [ -z "$env_inst" ] && ! gitea_can_prompt; then
+    echo "Gitea is not installed, and this run has no keyboard"
+    echo "  (stdin is not a terminal and /dev/tty is unusable)."
+    echo "Re-run from a real terminal to be prompted, or:"
+    echo "  GITEA_INSTALL=Y ./install-stardust.sh -m ${ROLE:-devel}"
+    echo "  (optional: GITEA_DOMAIN GITEA_OWNER GITEA_SSH_HOST …)"
+    echo "Skipping the forge for now. Other steps are unchanged."
     return 0
   fi
 
   if [ -n "$env_inst" ]; then
     do_install=$env_inst
-  elif [ -t 0 ]; then
+  elif gitea_can_prompt; then
     gitea_prompt_intro
     do_install=$(gitea_ask "Install Gitea on this host?  (Y/n)" "$inst_def" "$GITEA_HELP_INSTALL" \
       "Needed: Y or n. Y installs a Git forge on THIS machine. n if GitHub or another host already is the forge.")
@@ -1335,7 +1409,7 @@ gitea_run_phase() {
   ssh_host=${GITEA_SSH_HOST:-}
   http_port=${GITEA_HTTP_PORT:-3000}
 
-  if [ -t 0 ]; then
+  if gitea_can_prompt; then
     [ -n "$ver" ] || ver=$(gitea_ask "Gitea version to download" "$ver_def" "$GITEA_HELP_VERSION" \
       "Needed: a three-part version (1.27.3). Not a URL, not latest. Enter keeps the default.")
     [ -n "$domain" ] || domain=$(gitea_ask "Public hostname for the forge  (browser + git SSH)" "$(gitea_default_domain)" "$GITEA_HELP_DOMAIN" \
@@ -1399,7 +1473,7 @@ gitea_run_phase() {
     start_ssh=true
     if [ -n "${GITEA_SSH_PORT:-}" ]; then
       ssh_port=$GITEA_SSH_PORT
-    elif [ -t 0 ]; then
+    elif gitea_can_prompt; then
       ssh_port=$(gitea_ask "Gitea built-in SSH listen port" "2222" "$GITEA_HELP_SSH_PORT" \
         "Needed: TCP port for Gitea's built-in SSH. 2222 is the usual pick. CSF does not open this for you.")
     else

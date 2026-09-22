@@ -338,8 +338,9 @@ It WILL, if you say Y and app.ini is absent:
   STARDUST_GIT_TEMPLATE=git@HOST:OWNER/%s.git in /etc/stardust.conf
   SSH config Host alias (gitea-starhq) so deploy can git ls-remote
 
-Non-interactive (no TTY): skipped unless GITEA_INSTALL=Y. Optional
-env: GITEA_DOMAIN GITEA_OWNER GITEA_SSH_HOST GITEA_ADMIN
+Non-interactive (cron / no /dev/tty): skipped unless GITEA_INSTALL=Y.
+Theia, sudo, and piped stdin still prompt via /dev/tty when a keyboard
+is attached. Optional env: GITEA_DOMAIN GITEA_OWNER GITEA_SSH_HOST GITEA_ADMIN
 GITEA_ADMIN_EMAIL GITEA_ADMIN_PASS GITEA_DB=sqlite3|mysql
 GITEA_PROXY=Y|n GITEA_SSH=system|gitea GITEA_VERSION=1.27.3
 GITEA_SSH_PORT=2222 GITEA_HTTP_PORT=3000
