@@ -39,10 +39,13 @@ else
     exit 1
 fi
 
-# --- CREATE GITEA USER ---
-echo "--> Creating dedicated system user 'git'..."
+# --- CREATE GIT USER (nologin, like deploy; no /home/git) ---
+echo "--> Creating dedicated system user 'git' (nologin, like deploy)..."
+echo "    (standalone leftover — prefer apps/gitea/install.sh)"
 if ! id "git" &>/dev/null; then
-    sudo useradd --system --shell /bin/bash --comment "Git Version Control" --create-home git
+    sudo useradd --system --shell /usr/sbin/nologin --comment "Git Version Control" \
+        --home-dir /var/lib/gitea --no-create-home git
+    sudo passwd -l git >/dev/null 2>&1 || true
 else
     echo "User 'git' already exists, skipping creation."
 fi

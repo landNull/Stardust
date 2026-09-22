@@ -3,8 +3,12 @@ modules/60-gitea.sh
 gitea-install.sh          standalone leftover — module is source of truth
 verbs: none (host install phase only)
 install: optional Gitea binary from dl.gitea.com (never the homepage)
+         system user git (nologin, locked, HOME /var/lib/gitea — like deploy)
+         no /home/git, no login shell; git@ in URLs is SSH_USER
+         Gitea's own SSH on 2222 (OpenSSH on 22 stays for humans)
          /etc/gitea/app.ini written only when absent
          STARDUST_GIT_TEMPLATE in /etc/stardust.conf
 rule: do not rewrite an existing app.ini
 rule: do not wget https://gitea.com
+rule: do not create /home/git or a login shell on the forge account
 prompts: short question + one-line "Needed:" + (? / help) long new-sysadmin examples

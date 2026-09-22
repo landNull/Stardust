@@ -32,6 +32,9 @@ system:
   deploy     system account. Owns Git trees and runs Bee.
              HOME /srv/stardust/home, shell nologin, locked password.
              sudo -u deploy bee|git|crdir. Not a human login.
+  git        system account that *runs* the forge (STEP 60), same method
+             as deploy: nologin, locked, HOME /var/lib/gitea. Not /home/git.
+             git@ in clone URLs is SSH_USER; sshd never gives this user a shell.
   www-admin  file group on every tree. Not a login.
              Grant: usermod -aG www-admin,stardust,deploy NAME
              The installer adds the invoking login to those three
@@ -319,7 +322,7 @@ in [brackets].
 Install Gitea on this host?  (Y/n)
   Y on devel / --localhost if you do not already have a forge.
   n on test/live (those hosts clone FROM the forge).
-  n if the forge is GitHub landNull or Gitea on another machine.
+  n if the forge is GitHub (example) or Gitea on another machine.
 
 It will NOT:
   download HTML from https://gitea.com (binary comes from dl.gitea.com,
@@ -328,20 +331,22 @@ It will NOT:
   fail the rest of Stardust if you skip it
 
 It WILL, if you say Y and app.ini is absent:
-  create system user git, dirs under /var/lib/gitea and /etc/gitea
+  create system user git (nologin, locked, HOME /var/lib/gitea — like deploy)
+  no /home/git, no login shell; git@ in URLs is SSH_USER (Gitea SSH on 2222)
   install /usr/local/bin/gitea
   write app.ini (INSTALL_LOCK=true, default branch devel,
-    registration closed)
+    registration closed, Gitea SSH on 2222)
   sysvinit script (systemd/openrc when that is init)
   optional Apache vhost stardust-gitea (http://HOSTNAME/ → :3000)
   a Gitea admin user
   STARDUST_GIT_TEMPLATE=git@HOST:OWNER/%s.git in /etc/stardust.conf
-  SSH config Host alias (gitea-starhq) so deploy can git ls-remote
+  SSH config Host alias (gitforge, Port 2222) so deploy can git ls-remote
 
-Non-interactive (no TTY): skipped unless GITEA_INSTALL=Y. Optional
-env: GITEA_DOMAIN GITEA_OWNER GITEA_SSH_HOST GITEA_ADMIN
+Non-interactive (cron / no /dev/tty): skipped unless GITEA_INSTALL=Y.
+Theia, sudo, and piped stdin still prompt via /dev/tty when a keyboard
+is attached. Optional env: GITEA_DOMAIN GITEA_OWNER GITEA_SSH_HOST GITEA_ADMIN
 GITEA_ADMIN_EMAIL GITEA_ADMIN_PASS GITEA_DB=sqlite3|mysql
-GITEA_PROXY=Y|n GITEA_SSH=system|gitea GITEA_VERSION=1.27.3
+GITEA_PROXY=Y|n GITEA_SSH=gitea GITEA_VERSION=1.27.3
 GITEA_SSH_PORT=2222 GITEA_HTTP_PORT=3000
 
 After a yes:
@@ -349,7 +354,7 @@ After a yes:
   browse ROOT_URL, sign in as the admin you named
   create the organization you put in the owner/org prompt
   add deploy's printed public key as a deploy key on that org
-  sudo -u deploy git ls-remote git@gitea-starhq:ORG/ecom.git
+  sudo -u deploy git ls-remote git@gitforge:acme/myapp.git
 
 Re-run of install-stardust.sh is safe: existing Gitea + app.ini
 are left alone; only a missing STARDUST_GIT_TEMPLATE is prompted.
