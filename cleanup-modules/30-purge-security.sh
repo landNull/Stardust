@@ -1,51 +1,76 @@
 # cleanup-modules/30-purge-security.sh
-# Worker Module: Drops custom sudoers privileges and manages Stardust system users
+# Sudoers, app accounts, and the groups those accounts owned.
+# App homes under /home and $STARDUST/home go with userdel -r.
+# The invoking login and stock daemons are left alone.
 
-echo "👥 STEP 30: Purging System Users & Security Policies"
-echo "----------------------------------------------------"
+echo "STEP 30: sudoers, app accounts, groups"
+echo "--------------------------------------"
 
 purge_sudoers() {
-  for slice in stardust-deploy stardust-admin; do
-    local target="/etc/sudoers.d/$slice"
-    if [ -f "$target" ]; then
-      if [ "$DRYRUN" -eq 1 ]; then
-        echo "+ rm -f $target"
-      else
-        as_root rm -f "$target"
-        echo "  ✓ Removed sudoers drop-in: $target"
-      fi
-    fi
+  for slice in stardust-deploy stardust-admin stardust; do
+    do_rm "/etc/sudoers.d/$slice"
   done
 }
 
-purge_user() {
-  local username="$1"
-  if id "$username" >/dev/null 2>&1; then
-    # We do NOT run a destructive 'userdel -r' automatically because the user 
-    # might own active files or assets outside of the /srv/stardust root.
-    if [ "$DRYRUN" -eq 1 ]; then
-      echo "+ userdel $username (Keeps home directory safe)"
-    else
-      as_root userdel "$username" 2>/dev/null || true
-      echo "  ✓ Offboarded user system login access: $username"
-    fi
+# Per-user conf written by user_conf(). Do not delete the invoker's home.
+strip_user_conf() {
+  _name=$1
+  [ -n "$_name" ] || return 0
+  _home=$(getent passwd "$_name" 2>/dev/null | cut -d: -f6 || true)
+  [ -n "$_home" ] || _home=/home/$_name
+  if [ -f "$_home/.stardust.conf" ]; then
+    do_rm "$_home/.stardust.conf"
   fi
 }
 
-purge_group() {
-  local groupname="$1"
-  if getent group "$groupname" >/dev/null 2>&1; then
-    if [ "$DRYRUN" -eq 1 ]; then
-      echo "+ groupdel $groupname"
-    else
-      as_root groupdel "$groupname" 2>/dev/null || true
-      echo "  ✓ Removed platform tracking group: $groupname"
-    fi
-  fi
-}
-
-# Fire execution stack in reverse order of creation
 purge_sudoers
-purge_user "$ADMIN"
-purge_user "$OWNER"
-purge_group "stardust"
+
+# Invoker keeps the login; only the generated conf and extra groups go away.
+if [ -n "$INVOKER" ]; then
+  strip_user_conf "$INVOKER"
+  if id "$INVOKER" >/dev/null 2>&1; then
+    for g in "$GROUP" stardust "$OWNER" git; do
+      [ -n "$g" ] || continue
+      if [ "$DRYRUN" -eq 1 ]; then
+        echo "+ gpasswd -d $INVOKER $g"
+      else
+        as_root gpasswd -d "$INVOKER" "$g" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
+fi
+
+# App accounts the installer created (or left behind from earlier policy).
+# Order: extra logins first, then owner, then git (Gitea).
+if [ -n "$ADMIN" ] && [ "$ADMIN" != "$INVOKER" ]; then
+  purge_login "$ADMIN"
+fi
+if [ -n "$OWNER" ] && [ "$OWNER" != "$INVOKER" ]; then
+  purge_login "$OWNER"
+fi
+purge_login git
+
+# Homes the installer used even if the passwd line is already gone.
+do_rm "$STARDUST/home"
+do_rm /home/git
+if [ -n "$OWNER" ] && [ "$OWNER" != "$INVOKER" ]; then
+  do_rm "/home/$OWNER"
+fi
+if [ -n "$ADMIN" ] && [ "$ADMIN" != "$INVOKER" ] && [ "$ADMIN" != www-data ]; then
+  do_rm "/home/$ADMIN"
+fi
+
+# Groups after the logins are gone. www-admin is group-only by current policy.
+purge_group git
+purge_group stardust
+if [ -n "$OWNER" ]; then
+  purge_group "$OWNER"
+fi
+if [ -n "$GROUP" ]; then
+  purge_group "$GROUP"
+fi
+if [ -n "$ADMIN" ] && [ "$ADMIN" != "$GROUP" ]; then
+  purge_group "$ADMIN"
+fi
+
+echo "  security identities removed"

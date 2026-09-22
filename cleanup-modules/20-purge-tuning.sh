@@ -1,68 +1,91 @@
 # cleanup-modules/20-purge-tuning.sh
-# Worker Module: Reverts OS kernel modifications, PHP configs, and web server performance drops
+# Drop installer-written configs. Leave distro defaults.
 
-echo "⚙️ STEP 20: Purging Performance Tuning & Configurations"
-echo "--------------------------------------------------------"
+echo "STEP 20: tuning drop-ins"
+echo "-----------------------"
 
-purge_apache_tuning() {
-  local perf_conf="/etc/apache2/conf-available/stardust-perf.conf"
-  local harden_conf="/etc/apache2/conf-available/stardust-harden.conf"
-  
-  if [ "$DRYRUN" -eq 1 ]; then
-    [ -f "$perf_conf" ] && echo "+ rm -f /etc/apache2/conf-enabled/stardust-perf.conf && rm -f $perf_conf"
-    [ -f "$harden_conf" ] && echo "+ rm -f /etc/apache2/conf-enabled/stardust-harden.conf && rm -f $harden_conf"
-  else
-    as_root rm -f /etc/apache2/conf-enabled/stardust-perf.conf /etc/apache2/conf-available/stardust-perf.conf
-    as_root rm -f /etc/apache2/conf-enabled/stardust-harden.conf /etc/apache2/conf-available/stardust-harden.conf
-    echo "  ✓ Dropped custom Apache performance configs."
-  fi
+rm_if() {
+  do_rm "$1"
 }
 
-purge_php_tuning() {
+echo "  Apache..."
+rm_if /etc/apache2/conf-enabled/stardust-perf.conf
+rm_if /etc/apache2/conf-available/stardust-perf.conf
+rm_if /etc/apache2/conf-enabled/stardust-harden.conf
+rm_if /etc/apache2/conf-available/stardust-harden.conf
+rm_if /etc/apache2/conf-enabled/stardust-localhost.conf
+rm_if /etc/apache2/conf-available/stardust-localhost.conf
+
+# Platform / site vhosts that point at /srv/platforms or carry the stardust- prefix.
+if [ -d /etc/apache2/sites-available ]; then
   if [ "$DRYRUN" -eq 1 ]; then
-    echo "+ Scanning /etc/php for 30-stardust.ini, 35-stardust-cli.ini, and 35-stardust-harden.ini to remove"
+    echo "+ scan /etc/apache2/sites-* for stardust-* and /srv/platforms vhosts"
   else
-    # Automatically locate all nested ini drop-ins across FPM, CLI, and Apache SAPIs
-    find /etc/php /etc/php.d -type f \( -name "30-stardust.ini" -o -name "35-stardust-*.ini" \) 2>/dev/null | while read -r ini_file; do
-      as_root rm -f "$ini_file"
+    for f in /etc/apache2/sites-available/stardust-*.conf \
+             /etc/apache2/sites-enabled/stardust-*.conf; do
+      [ -e "$f" ] || [ -L "$f" ] || continue
+      base=$(basename "$f" .conf)
+      if command -v a2dissite >/dev/null 2>&1; then
+        as_root a2dissite "$base" >/dev/null 2>&1 || true
+      fi
+      as_root rm -f "$f"
+      echo "  removed $f"
     done
-    echo "  ✓ Cleared out Stardust runtime variables from PHP engine."
-  fi
-}
-
-purge_mysql_tuning() {
-  if [ "$DRYRUN" -eq 1 ]; then
-    echo "+ Scanning /etc/mysql /etc/my.cnf.d for 90-stardust.cnf to remove"
-  else
-    find /etc/mysql /etc/my.cnf.d -type f -name "90-stardust.cnf" 2>/dev/null | while read -r cnf_file; do
-      as_root rm -f "$cnf_file"
+    for f in /etc/apache2/sites-available/*.conf; do
+      [ -f "$f" ] || continue
+      case $f in
+        */000-default.conf|*/default-ssl.conf|*/000-default-le-ssl.conf) continue ;;
+      esac
+      if grep -q /srv/platforms "$f" 2>/dev/null; then
+        base=$(basename "$f" .conf)
+        if command -v a2dissite >/dev/null 2>&1; then
+          as_root a2dissite "$base" >/dev/null 2>&1 || true
+        fi
+        as_root rm -f "$f" "/etc/apache2/sites-enabled/${base}.conf"
+        echo "  removed platform vhost $f"
+      fi
     done
-    echo "  ✓ Restored default engine buffers for MariaDB."
   fi
-}
+fi
 
-purge_sysctl_tuning() {
-  local sysctl_conf="/etc/sysctl.d/60-stardust.conf"
-  local limits_conf="/etc/security/limits.d/stardust.conf"
-  local logrotate_conf="/etc/logrotate.d/stardust"
-  local unattended_conf="/etc/apt/apt.conf.d/52stardust-unattended"
+echo "  PHP..."
+if [ "$DRYRUN" -eq 1 ]; then
+  echo "+ rm /etc/php*/**/{30-stardust.ini,35-stardust-*.ini,pool.d/stardust.conf}"
+else
+  find /etc/php /etc/php.d -type f \( \
+    -name "30-stardust.ini" -o \
+    -name "35-stardust-*.ini" -o \
+    -name "stardust.ini" \
+  \) 2>/dev/null | while read -r ini_file; do
+    as_root rm -f "$ini_file"
+    echo "  removed $ini_file"
+  done
+  find /etc/php -type f -path "*/fpm/pool.d/stardust.conf" 2>/dev/null | while read -r pool; do
+    as_root rm -f "$pool"
+    echo "  removed $pool"
+  done
+  as_root rm -f /run/php/stardust-fpm.sock /run/php/stardust-fpm.sock.default
+fi
 
-  if [ "$DRYRUN" -eq 1 ]; then
-    [ -f "$sysctl_conf" ] && echo "+ rm -f $sysctl_conf && sysctl --system"
-    [ -f "$limits_conf" ] && echo "+ rm -f $limits_conf"
-    [ -f "$logrotate_conf" ] && echo "+ rm -f $logrotate_conf"
-    [ -f "$unattended_conf" ] && echo "+ rm -f $unattended_conf"
-  else
-    [ -f "$sysctl_conf" ] && as_root rm -f "$sysctl_conf" && as_root sysctl --system >/dev/null 2>&1 || true
-    [ -f "$limits_conf" ] && as_root rm -f "$limits_conf"
-    [ -f "$logrotate_conf" ] && as_root rm -f "$logrotate_conf"
-    [ -f "$unattended_conf" ] && as_root rm -f "$unattended_conf"
-    echo "  ✓ Successfully restored system core limits and background parameters."
-  fi
-}
+echo "  MariaDB drop-ins..."
+if [ "$DRYRUN" -eq 1 ]; then
+  echo "+ rm */90-stardust.cnf"
+else
+  find /etc/mysql /etc/my.cnf.d -type f -name "90-stardust.cnf" 2>/dev/null | while read -r cnf_file; do
+    as_root rm -f "$cnf_file"
+    echo "  removed $cnf_file"
+  done
+fi
 
-# Fire execution pipeline
-purge_apache_tuning
-purge_php_tuning
-purge_mysql_tuning
-purge_sysctl_tuning
+echo "  sysctl / limits / logrotate / apt / dns / profile..."
+rm_if /etc/sysctl.d/60-stardust.conf
+rm_if /etc/security/limits.d/stardust.conf
+rm_if /etc/logrotate.d/stardust
+rm_if /etc/apt/apt.conf.d/52stardust-unattended
+rm_if /etc/dnsmasq.d/stardust.conf
+rm_if /etc/profile.d/stardust.sh
+if [ "$DRYRUN" -ne 1 ]; then
+  as_root sysctl --system >/dev/null 2>&1 || true
+fi
+
+echo "  tuning drop-ins removed"
