@@ -1,0 +1,70 @@
+{
+  "schema": "stardust.project-settings/v1",
+  "generated": "2026-09-28",
+  "purpose": "Compact Grok / IDE project settings for Stardust on knarr. No credentials, keys, IPs, or secret paths. Full inventory: conf/stardust-knarr-settings.json once merged; artifacts copy until then.",
+
+  "paste_into_project_settings": [
+    "Devuan sysvinit host starhq.knarr / knarr. Role devel. IDE Theia.",
+    "Repo github.com/landNull/Stardust.git. Default branch devel. Work branch features/GrokBranch. User merges GrokBranch into devel on starhq.",
+    "Stardust 0.4.0 is a CLI control plane for Backdrop CMS (Apache + PHP + MariaDB + Bee + crdir). Tools repo, not a site. Do not stardust platform-add stardust.",
+    "Read conf/project-settings.json and conf/stardust-knarr-settings.json before changing apps, roles, DNS, or vhosts.",
+    "install-stardust.sh installs platform apps from apps/MANIFEST only. It must not install product apps.",
+    "Platform install order: host apache dnsmasq php security mariadb deploy bee gitea.",
+    "Runtime (not an install phase): core platform site doctor migrate-d7 ui.",
+    "Product apps (Nextcloud first) are tenants under /srv/apps, not Backdrop sites under /srv/platforms. Do not stardust site-add nextcloud.",
+    "www-admin is group-only. Do not create a www-admin user. Extra login only with -a NAME when NAME != GROUP.",
+    "deploy is nologin, HOME /srv/stardust/home, locked. Groups www-admin,stardust,deploy. Never group sudo.",
+    "Sudoers: deploy + %www-admin for stardust-priv / bee / git / crdir only.",
+    "Name-based Apache *:80 + ServerName/ServerAlias. No loopback /etc/hosts pins for *.knarr or *.devel. No extra Listen 127.0.0.1:80.",
+    "Product PHP must not use /run/php/stardust-fpm.sock."
+  ],
+
+  "host": {
+    "name": "knarr",
+    "hostname": "starhq.knarr",
+    "aliases": ["starhq.knarr", "knarr"],
+    "os": "Devuan",
+    "init": "sysvinit",
+    "role": "devel",
+    "ide": "Theia"
+  },
+
+  "repository": {
+    "url": "https://github.com/landNull/Stardust.git",
+    "default_branch": "devel",
+    "work_branch": "features/GrokBranch",
+    "merge": "User merges GrokBranch into devel on starhq"
+  },
+
+  "stardust": {
+    "version": "0.4.0",
+    "kind": "tools",
+    "stack": ["Apache", "PHP", "MariaDB", "Bee", "crdir"],
+    "orchestrator": "install-stardust.sh",
+    "manifest": "apps/MANIFEST",
+    "cli": "bin/stardust"
+  },
+
+  "apps": {
+    "platform": ["host", "apache", "dnsmasq", "php", "security", "mariadb", "deploy", "bee", "gitea"],
+    "runtime": ["core", "platform", "site", "doctor", "migrate-d7", "ui"],
+    "product": ["nextcloud"]
+  },
+
+  "roles": {
+    "www-admin": "group only; owns code trees; sudo stardust-priv bee git crdir",
+    "deploy": "nologin system account; HOME /srv/stardust/home; never group sudo",
+    "stardust": "secrets group",
+    "www-data": "daemon; also in www-admin",
+    "sd": "knarr operator; groups only"
+  },
+
+  "contracts": [
+    "Backdrop sites: stardust site-* under /srv/platforms",
+    "Product apps: stardust apps install|align|status|remove|doctor NAME; code /srv/apps/<name>; data /srv/apps/<name>-data; secrets /srv/apps/<name>-secrets",
+    "install-stardust.sh does not install product apps",
+    "No *.knarr / *.devel on 127.0.0.1 or 127.0.1.1",
+    "No www-admin login user",
+    "No product PHP on stardust-fpm.sock"
+  ]
+}

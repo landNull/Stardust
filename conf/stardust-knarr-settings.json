@@ -1,0 +1,193 @@
+{
+  "schema": "stardust.host-and-apps/v1",
+  "generated": "2026-09-28",
+  "purpose": "Shared non-secret settings for the Stardust tools project and the knarr host outline. No credentials, keys, IPs, or secret paths.",
+
+  "host": {
+    "name": "knarr",
+    "hostname": "starhq.knarr",
+    "aliases": ["starhq.knarr", "knarr"],
+    "os": {
+      "family": "debian",
+      "distro": "Devuan",
+      "init": "sysvinit"
+    },
+    "hardware": {
+      "cpu": "8-core AMD FX-8320E",
+      "ram": "32GB",
+      "storage": "2x 1TB SSD RAID 1"
+    },
+    "ide": "Theia",
+    "role": "devel"
+  },
+
+  "stardust": {
+    "product": "Stardust",
+    "version": "0.4.0",
+    "description": "CLI control plane for Backdrop CMS. Tools repo, not a site.",
+    "stack": ["Apache", "PHP", "MariaDB", "Bee", "crdir"],
+    "repository": {
+      "url": "https://github.com/landNull/Stardust.git",
+      "default_branch": "devel",
+      "work_branch": "features/GrokBranch"
+    },
+    "layout": {
+      "orchestrator": "install-stardust.sh",
+      "compat_wrapper": "stardust-install.sh",
+      "apps_dir": "apps/",
+      "manifest": "apps/MANIFEST",
+      "modules_dir": "modules/",
+      "runtime_libs": "lib/",
+      "cli": "bin/stardust"
+    },
+    "host_roles": ["devel", "test", "live"]
+  },
+
+  "roles": {
+    "www-admin": {
+      "type": "group",
+      "login": false,
+      "note": "File group only. Extra login only with installer -a NAME when NAME != GROUP. Do not create a www-admin user.",
+      "owns": "Apache/PHP trees and /srv/apps product trees (group)",
+      "sudo": ["stardust-priv", "bee", "git", "crdir"]
+    },
+    "deploy": {
+      "type": "system",
+      "shell": "nologin",
+      "home": "/srv/stardust/home",
+      "locked": true,
+      "groups": ["www-admin", "stardust", "deploy"],
+      "sudo_group": false,
+      "note": "Git/deploy identity. Not an interactive admin. New hosts use HOME /srv/stardust/home."
+    },
+    "stardust": {
+      "type": "group",
+      "purpose": "secrets",
+      "note": "Secrets dirs only; not web-readable."
+    },
+    "www-data": {
+      "type": "daemon",
+      "also_in": ["www-admin"],
+      "note": "Apache/PHP worker. Not the sole owner of /srv/apps/*."
+    },
+    "sd": {
+      "type": "operator",
+      "note": "Temporary VM operator on knarr. Groups only. Installer must not add group sudo."
+    },
+    "product_apps": {
+      "code_owner_group": "www-admin",
+      "daemon": "www-data",
+      "secrets_group": "stardust",
+      "deploy_account": "deploy"
+    }
+  },
+
+  "apps": {
+    "install_order": [
+      "host",
+      "apache",
+      "dnsmasq",
+      "php",
+      "security",
+      "mariadb",
+      "deploy",
+      "bee",
+      "gitea"
+    ],
+    "platform": [
+      {
+        "name": "host",
+        "kind": "platform",
+        "role": "Base host layout, groups, and paths"
+      },
+      {
+        "name": "apache",
+        "kind": "platform",
+        "role": "HTTP server; name-based *:80 vhosts"
+      },
+      {
+        "name": "dnsmasq",
+        "kind": "platform",
+        "role": "Local resolver; wildcards for *.devel and *.knarr; STEP 25"
+      },
+      {
+        "name": "php",
+        "kind": "platform",
+        "role": "PHP runtime for Backdrop platforms"
+      },
+      {
+        "name": "security",
+        "kind": "platform",
+        "role": "Host hardening and privilege helpers"
+      },
+      {
+        "name": "mariadb",
+        "kind": "platform",
+        "role": "Database; STEP 40 tune and secure"
+      },
+      {
+        "name": "deploy",
+        "kind": "platform",
+        "role": "System deploy account and sudoers for stardust-priv / bee / git / crdir"
+      },
+      {
+        "name": "bee",
+        "kind": "platform",
+        "role": "Backdrop CLI; stardust bee PLATFORM PRODUCT"
+      },
+      {
+        "name": "gitea",
+        "kind": "platform",
+        "role": "Git forge; STEP 60"
+      }
+    ],
+    "runtime": [
+      {
+        "name": "core",
+        "kind": "runtime",
+        "role": "Shared core helpers; not an install phase"
+      },
+      {
+        "name": "platform",
+        "kind": "runtime",
+        "role": "stardust platform-* verbs"
+      },
+      {
+        "name": "site",
+        "kind": "runtime",
+        "role": "stardust site-* verbs for Backdrop sites"
+      },
+      {
+        "name": "doctor",
+        "kind": "runtime",
+        "role": "stardust doctor platform checks"
+      },
+      {
+        "name": "migrate-d7",
+        "kind": "runtime",
+        "role": "Drupal 7 / BOA to Backdrop migration helpers"
+      },
+      {
+        "name": "ui",
+        "kind": "runtime",
+        "role": "Optional TUI; not required on host"
+      }
+    ],
+    "product": [
+      {
+        "name": "nextcloud",
+        "kind": "product",
+        "status": "planned",
+        "note": "First product app under the apps contract. Lives in a separate NxtCldInst repo today. Not installed by install-stardust.sh. Not a Backdrop site."
+      }
+    ]
+  },
+
+  "contracts": {
+    "backdrop_sites": "Use stardust site-* under /srv/platforms. Do not treat product apps as sites.",
+    "product_apps": "Use stardust apps install|align|status|remove|doctor NAME once the contract lands. Code and data live under /srv/apps, not /srv/platforms.",
+    "install_stardust": "install-stardust.sh installs platform apps from MANIFEST only. It must not install product apps.",
+    "dns_vhosts": "Name-based Apache *:80. No loopback pins in /etc/hosts for *.knarr or *.devel.",
+    "identity": "Product and platform apps inherit roles.www-admin / deploy / stardust / www-data. No new sudo group. No www-admin login user."
+  }
+}
