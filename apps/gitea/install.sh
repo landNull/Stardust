@@ -1137,6 +1137,7 @@ GITEA_USER="git"
 GITEA_BIN="/usr/local/bin/gitea"
 GITEA_WORK_DIR="/var/lib/gitea"
 GITEA_CONFIG="/etc/gitea/app.ini"
+GITEA_GROUP="www-admin"
 PIDFILE="/var/run/gitea.pid"
 export USER=git
 export HOME=/var/lib/gitea
@@ -1153,8 +1154,9 @@ do_start() {
   fi
   if command -v start-stop-daemon >/dev/null 2>&1; then
     start-stop-daemon --start --quiet --background --make-pidfile --pidfile "$PIDFILE" \
-      --chuid "$GITEA_USER" --chdir "$GITEA_WORK_DIR" \
-      --exec "$GITEA_BIN" -- web --config "$GITEA_CONFIG"
+      --chuid "$GITEA_USER:$GITEA_GROUP" --chdir "$GITEA_WORK_DIR" \
+      --exec "$GITEA_BIN" -- web --config "$GITEA_CONFIG" \
+      --work-path "$GITEA_WORK_DIR"
     return $?
   fi
   su -s /bin/sh -c "cd '$GITEA_WORK_DIR' && exec '$GITEA_BIN' web --config '$GITEA_CONFIG'" "$GITEA_USER" \
