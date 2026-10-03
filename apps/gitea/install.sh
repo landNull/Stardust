@@ -1431,10 +1431,7 @@ gitea_run_phase() {
     return 0
   fi
 
-  if [ ! -t 0 ] && [ -z "$env_inst" ]; then
-    echo "no TTY — skip Gitea install (GITEA_INSTALL=Y to force, or set STARDUST_GIT_TEMPLATE later)"
-    return 0
-  fi
+
 
   if [ -n "$env_inst" ]; then
     do_install=$env_inst
