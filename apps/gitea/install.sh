@@ -1462,7 +1462,6 @@ gitea_run_phase() {
   ssh_host=${GITEA_SSH_HOST:-}
   http_port=${GITEA_HTTP_PORT:-3000}
 
-  if [ -t 0 ]; then
     [ -n "$ver" ] || ver=$(gitea_ask "Gitea version to download" "$ver_def" "$GITEA_HELP_VERSION" \
       "Needed: a three-part version (1.27.3). Not a URL, not latest. Enter keeps the default.")
     [ -n "$domain" ] || domain=$(gitea_ask "Public hostname for the forge  (browser + git SSH)" "$(gitea_default_domain)" "$GITEA_HELP_DOMAIN" \
@@ -1486,7 +1485,7 @@ gitea_run_phase() {
       "Needed: the HOST in git@HOST:org/repo.git — usually an SSH alias like gitea-starhq.")
     [ -n "$owner" ] || owner=$(gitea_ask "Git owner/org — first path after the colon" "" "$GITEA_HELP_OWNER" \
       "Needed: the org or username after the colon (myorg in git@HOST:myorg/ecom.git). Empty skips the clone template.")
-  else
+
     [ -n "$ver" ] || ver=$ver_def
     [ -n "$domain" ] || domain=$(gitea_default_domain)
     [ -n "$proxy" ] || proxy=Y
@@ -1495,7 +1494,7 @@ gitea_run_phase() {
     [ -n "$admin" ] || admin=${HUMAN:-admin}
     [ -n "$admin_email" ] || admin_email="${admin}@${domain}"
     [ -n "$ssh_host" ] || ssh_host=$(gitea_default_ssh_host)
-  fi
+
 
   [ -n "$ver" ] || ver=$ver_def
   [ -n "$domain" ] || domain=$(gitea_default_domain)
