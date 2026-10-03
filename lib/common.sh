@@ -394,7 +394,13 @@ check_operator_groups() {
   return 0
 }
 
-have() { command -v "$1" >/dev/null 2>&1; }
+have() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  for d in /usr/sbin /sbin /usr/bin /bin; do
+    [ -x "$d/$1" ] && return 0
+  done
+  return 1
+}
 ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; }
 note() { printf '  note  %s\n' "$1"; }
