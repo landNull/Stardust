@@ -1,0 +1,15 @@
+apps/gitea/install.sh
+modules/60-gitea.sh
+gitea-install.sh          standalone leftover — module is source of truth
+verbs: none (host install phase only)
+install: optional Gitea binary from dl.gitea.com (never the homepage)
+         /etc/gitea/app.ini written only when absent
+         section order: server database security oauth2 log service repository mailer lfs actions
+         REVERSE_PROXY_* in [security]; [oauth2] JWT_SECRET set before chmod 640
+         MariaDB: user, then database utf8mb4_bin, then GRANT, then app.ini
+         STARDUST_GIT_TEMPLATE in /etc/stardust.conf
+rule: do not rewrite an existing app.ini
+rule: Apache vhost is *:80 + ServerAlias git.devel git.starhq.knarr
+      (dnsmasq wildcards; do not pin those names to 127.0.0.1)
+rule: do not wget https://gitea.com
+prompts: short question + one-line "Needed:" + (? / help) long new-sysadmin examples
