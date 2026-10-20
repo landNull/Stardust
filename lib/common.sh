@@ -446,20 +446,15 @@ as_root() {
     refuse
     return 1
   fi
-  if have sudo && sudo -n true >/dev/null 2>&1; then
+  # Non -u path. Sudoers allows only specific binaries as root,
+  # all NOPASSWD. Try sudo -n. Never fall through to a password
+  # prompt; a locked account cannot type one.
+  if have sudo; then
     sudo -n "$@"
     return $?
   fi
-  if [ "$capcom" -eq 1 ]; then
-    refuse
-    return 1
-  fi
-  if [ -n "${STARDUST_SUDO_ASKPASS:-}" ] && [ -x "$STARDUST_SUDO_ASKPASS" ]; then
-    echo "sudo -A (askpass) $*" >&2
-    SUDO_ASKPASS=$STARDUST_SUDO_ASKPASS sudo -A "$@"
-    return $?
-  fi
-  sudo "$@"
+  refuse
+  return 1
 }
 
 run() {

@@ -43,9 +43,9 @@ EOF
   fi
   if ! grep -q "config/$product/active" "$dest" 2>/dev/null; then
     # Comment the template assignment so it cannot win over the Stardust path.
-    as_root sed -i "s|^\\(\$config_directories\\['active'\\] *= *'files/config_\\)|// \\1|" "$dest" 2>/dev/null || true
-    as_root sed -i "s|^\\(\$config_directories\\['staging'\\] *= *'files/config_\\)|// \\1|" "$dest" 2>/dev/null || true
-    as_root tee -a "$dest" >/dev/null <<EOF
+    sed -i "s|^\\(\$config_directories\\['active'\\] *= *'files/config_\\)|// \\1|" "$dest" 2>/dev/null || true
+    sed -i "s|^\\(\$config_directories\\['staging'\\] *= *'files/config_\\)|// \\1|" "$dest" 2>/dev/null || true
+    cat >> "$dest" <<EOF
 
 \$config_directories['active']  = '../config/$product/active';
 \$config_directories['staging'] = '../config/$product/staging';
@@ -75,12 +75,10 @@ ensure_sites_php() {
     return 1
   }
   if [ ! -f "$dest" ]; then
-    as_root tee "$dest" >/dev/null <<'EOF'
-<?php
-EOF
+    printf '%s\n' '<?php' > "$dest"
   fi
   if ! grep -q "sites\['$host'\]" "$dest" 2>/dev/null; then
-    as_root tee -a "$dest" >/dev/null <<EOF
+    cat >> "$dest" <<EOF
 \$sites['$host'] = '$product';
 EOF
   fi
@@ -104,7 +102,7 @@ ensure_local_php() {
     echo "+ write $dest"
     return 0
   fi
-  as_root tee "$dest" >/dev/null <<EOF
+  cat > "$dest" <<EOF
 <?php
 \$database = '$dsn';
 \$settings['trusted_host_patterns'] = array('$hostpat');
@@ -283,7 +281,7 @@ cmd_site_add() {
         chown -R "$OWNER:$GROUP" "$root/config/$product/active" 2>/dev/null || true
       fi
       ensure_settings_php "$root" "$product"
-      as_root touch "$web/sites/$product/.stardust-installed"
+      touch "$web/sites/$product/.stardust-installed"
       chown "$OWNER:$GROUP" "$web/sites/$product/.stardust-installed" 2>/dev/null || true
     else
       find "$root/config/$product/active" -mindepth 1 -delete 2>/dev/null || true
@@ -293,7 +291,7 @@ cmd_site_add() {
         echo "$PROG: bee install failed for $product" >&2
         return 1
       }
-      as_root touch "$web/sites/$product/.stardust-installed"
+      touch "$web/sites/$product/.stardust-installed"
       chown "$OWNER:$GROUP" "$web/sites/$product/.stardust-installed" 2>/dev/null || true
     fi
   fi
