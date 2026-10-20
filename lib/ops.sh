@@ -85,30 +85,32 @@ write_secret() {
   fi
   # Secrets dir is deploy:stardust with group write. Caller in
   # stardust can create the platform dir and the files.
-  mkdir -p "$SECRETDIR/$platform" 2>/dev/null || {
+  if ! mkdir -p "$SECRETDIR/$platform" 2>/dev/null; then
     echo "$PROG: cannot create $SECRETDIR/$platform" >&2
     return 1
-  }
-  cat > "$dest" <<EOF || {
-    echo "$PROG: cannot write $dest" >&2
-    return 1
-  }
+  fi
+  cat > "$dest" <<EOF
 # stardust secret — do not commit
 db=$db
 user=$user
 pass=$pass
 host=localhost
 EOF
-  cnf=${dest}.cnf
-  cat > "$cnf" <<EOF || {
-    echo "$PROG: cannot write $cnf" >&2
+  if [ ! -f "$dest" ]; then
+    echo "$PROG: cannot write $dest" >&2
     return 1
-  }
+  fi
+  cnf=${dest}.cnf
+  cat > "$cnf" <<EOF
 [client]
 user=$user
 password=$pass
 host=localhost
 EOF
+  if [ ! -f "$cnf" ]; then
+    echo "$PROG: cannot write $cnf" >&2
+    return 1
+  fi
   chmod 0640 "$dest" "$cnf" 2>/dev/null || true
 }
 
