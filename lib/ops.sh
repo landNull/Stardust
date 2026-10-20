@@ -19,16 +19,17 @@ task_log() {
     "${1:-?}" \
     "${2:-0}" \
     "${3:-}")
-  run_root mkdir -p "$STARDUST_ROOT/state"
+  # /srv/stardust/state is group-writable by stardust. Append as the
+  # caller. Do not sudo; a locked account cannot type a password.
   if [ "$DRYRUN" -eq 1 ]; then
     echo "+ journal $line"
     return 0
   fi
   if [ -w "$TASKS" ] || [ -w "$STARDUST_ROOT/state" ]; then
     printf '%s\n' "$line" >> "$TASKS" 2>/dev/null || \
-      as_root sh -c "printf '%s\n' '$line' >> '$TASKS'"
+      echo "$PROG: cannot write $TASKS" >&2
   else
-    as_root sh -c "printf '%s\n' '$line' >> '$TASKS'"
+    echo "$PROG: cannot write $TASKS (need write on $STARDUST_ROOT/state)" >&2
   fi
 }
 
