@@ -318,9 +318,9 @@ NOTIFY=${NOTIFY:-}
 HOOKS=${HOOKS:-$STARDUST_ROOT/hooks}
 
 run_hooks() {
-  name=$1
+  hook_name=$1
   shift
-  dir=$HOOKS/${name}.d
+  dir=$HOOKS/${hook_name}.d
   [ -d "$dir" ] || return 0
   for h in "$dir"/*; do
     [ -x "$h" ] || continue
@@ -436,21 +436,15 @@ as_root() {
       "$@"
       return $?
     fi
-    if have sudo && sudo -n -u "$tgt" true >/dev/null 2>&1; then
+    # Sudoers allows only specific binaries (bee, git, crdir) as $OWNER,
+    # all NOPASSWD. Try sudo -n. If it fails, refuse. A password prompt
+    # cannot succeed for a locked account and is never the right next step.
+    if have sudo; then
       sudo -n -u "$tgt" "$@"
       return $?
     fi
-    if [ "$capcom" -eq 1 ]; then
-      refuse
-      return 1
-    fi
-    if [ -n "${STARDUST_SUDO_ASKPASS:-}" ] && [ -x "$STARDUST_SUDO_ASKPASS" ]; then
-      echo "sudo -A -u $tgt $*" >&2
-      SUDO_ASKPASS=$STARDUST_SUDO_ASKPASS sudo -A -u "$tgt" "$@"
-      return $?
-    fi
-    sudo -u "$tgt" "$@"
-    return $?
+    refuse
+    return 1
   fi
   if have sudo && sudo -n true >/dev/null 2>&1; then
     sudo -n "$@"
