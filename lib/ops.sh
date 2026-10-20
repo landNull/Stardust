@@ -37,9 +37,9 @@ with_lock() {
   # with_lock NAME cmd...
   name=$(slug "${1:-global}")
   shift
-  run_root mkdir -p "$LOCKDIR"
-  run_root chown "$OWNER:stardust" "$LOCKDIR"
-  run_root chmod 2775 "$LOCKDIR"
+  # Locks live under state, group stardust. Create as the caller.
+  mkdir -p "$LOCKDIR" 2>/dev/null || true
+  chmod 2775 "$LOCKDIR" 2>/dev/null || true
   lock=$LOCKDIR/${name}.lock
   if [ "${DRYRUN:-0}" -eq 1 ]; then
     echo "+ lock $lock"
@@ -83,10 +83,11 @@ write_secret() {
     echo "+ write $dest (0640)"
     return 0
   fi
-  run_root mkdir -p "$SECRETDIR/$platform"
-  # operator is in stardust and must be able to stat the .cnf
-  run_root chown "$OWNER:stardust" "$SECRETDIR" "$SECRETDIR/$platform"
-  run_root chmod 2750 "$SECRETDIR" "$SECRETDIR/$platform"
+  # Secrets dir is deploy:stardust. Caller in stardust can mkdir.
+  mkdir -p "$SECRETDIR/$platform" 2>/dev/null || {
+    echo "$PROG: cannot create $SECRETDIR/$platform" >&2
+    return 1
+  }
   # tee, not sh -c cat: sudo does not forward a heredoc to sh -c
   as_root tee "$dest" >/dev/null <<EOF
 # stardust secret — do not commit

@@ -28,29 +28,37 @@ ensure_settings_php() {
     echo "+ write $dest"
     return 0
   fi
-  run_root mkdir -p "$web/sites/$product"
+  # Platform tree is deploy:www-admin setgid. Caller in www-admin
+  # can mkdir and write here. No run_root.
+  mkdir -p "$web/sites/$product" || {
+    echo "$PROG: cannot create $web/sites/$product" >&2
+    return 1
+  }
   if [ -f "$src" ] && [ ! -f "$dest" ]; then
-    run_root cp "$src" "$dest"
+    cp "$src" "$dest"
   elif [ ! -f "$dest" ]; then
-    as_root tee "$dest" >/dev/null <<'EOF'
+    cat > "$dest" <<'EOF'
 <?php
 EOF
   fi
   if ! grep -q "config/$product/active" "$dest" 2>/dev/null; then
+    # Comment the template assignment so it cannot win over the Stardust path.
+    as_root sed -i "s|^\\(\$config_directories\\['active'\\] *= *'files/config_\\)|// \\1|" "$dest" 2>/dev/null || true
+    as_root sed -i "s|^\\(\$config_directories\\['staging'\\] *= *'files/config_\\)|// \\1|" "$dest" 2>/dev/null || true
     as_root tee -a "$dest" >/dev/null <<EOF
 
-\$config_directories['active']  = '../../config/$product/active';
-\$config_directories['staging'] = '../../config/$product/staging';
+\$config_directories['active']  = '../config/$product/active';
+\$config_directories['staging'] = '../config/$product/staging';
 \$config['system.core']['config_sync_clear_staging'] = 0;
-\$config['system.core']['file_private_path'] = '../../files_private/$product';
-\$settings['file_public_path'] = '../../files/$product';
+\$config['system.core']['file_private_path'] = '../files_private/$product';
+\$settings['file_public_path'] = '../files/$product';
 
 if (file_exists(__DIR__ . '/settings.local.php')) {
   include __DIR__ . '/settings.local.php';
 }
 EOF
   fi
-  run_root chown "$OWNER:$GROUP" "$dest"
+  chown "$OWNER:$GROUP" "$dest" 2>/dev/null || true
 }
 
 ensure_sites_php() {
@@ -62,7 +70,10 @@ ensure_sites_php() {
     echo "+ \$sites['$host'] = '$product' in $dest"
     return 0
   fi
-  run_root mkdir -p "$web/sites"
+  mkdir -p "$web/sites" || {
+    echo "$PROG: cannot create $web/sites" >&2
+    return 1
+  }
   if [ ! -f "$dest" ]; then
     as_root tee "$dest" >/dev/null <<'EOF'
 <?php
@@ -73,7 +84,7 @@ EOF
 \$sites['$host'] = '$product';
 EOF
   fi
-  run_root chown "$OWNER:$GROUP" "$dest"
+  chown "$OWNER:$GROUP" "$dest" 2>/dev/null || true
 }
 
 ensure_local_php() {
@@ -100,8 +111,8 @@ ensure_local_php() {
 \$config['system.core']['preprocess_css'] = $pre;
 \$config['system.core']['preprocess_js']  = $pre;
 EOF
-  run_root chown "$OWNER:$GROUP" "$dest"
-  run_root chmod 0640 "$dest"
+  chown "$OWNER:$GROUP" "$dest" 2>/dev/null || true
+  chmod 0640 "$dest" 2>/dev/null || true
 }
 
 ensure_db() {
@@ -154,8 +165,8 @@ ensure_vhost() {
 </VirtualHost>
 EOF
   else
-    if ! grep -q "$host" "$conf"; then
-      as_root sed -i "s/^\\([[:space:]]*ServerName .*\\)/\\1\\n    ServerAlias $host/" "$conf"
+    if ! grep -q "ServerName $host\|ServerAlias $host" "$conf"; then
+      as_root sed -i "/ServerName /a\\    ServerAlias $host" "$conf"
     fi
   fi
   if have a2ensite; then
@@ -241,21 +252,35 @@ cmd_site_add() {
       echo "running core/scripts/install.sh --url=$host"
       phpbin=$(command -v php || true)
       [ -n "$phpbin" ] || phpbin=php
-      as_root -u "$OWNER" "$phpbin" "$web/core/scripts/install.sh" \
-        --url="$host" \
-        --db-url="mysql://${user}:${pass}@localhost/${db}" \
-        --site-name="$title" \
+      # install.sh requires ./core relative to the web root. as_root does not
+      # change directory, so cd there before the relative require.
+      # Empty config/active first; a leftover file makes install.sh 500.
+      find "$root/config/$product/active" -mindepth 1 -delete 2>/dev/null || true
+      as_root -u "$OWNER" sh -c "cd '$web' && exec '$phpbin' core/scripts/install.sh \
+        --url='$host' \
+        --db-url='mysql://${user}:${pass}@localhost/${db}' \
+        --site-name='$title' \
         --account-name=admin \
-        --account-pass="$pass" \
-        --account-mail="admin@${host}" \
-        --site-mail="admin@${host}" || {
+        --account-pass='$pass' \
+        --account-mail='admin@${host}' \
+        --site-mail='admin@${host}'" || {
         echo "$PROG: install.sh failed for $product" >&2
         return 1
       }
+      # install.sh can rewrite settings.php and drop the Stardust paths.
+      # It also writes config to the default files/config_<hash>/active.
+      # Move that into the Stardust path before re-asserting settings.
+      landed=$(find "$web" -type d -path '*/config_*/active' 2>/dev/null | head -1)
+      if [ -n "$landed" ] && [ -d "$landed" ]; then
+        echo "moving installed config from $landed"
+        cp -a "$landed/." "$root/config/$product/active/"
+        chown -R "$OWNER:$GROUP" "$root/config/$product/active" 2>/dev/null || true
+      fi
+      ensure_settings_php "$root" "$product"
       as_root touch "$web/sites/$product/.stardust-installed"
-      run_root chown "$OWNER:$GROUP" "$web/sites/$product/.stardust-installed"
+      chown "$OWNER:$GROUP" "$web/sites/$product/.stardust-installed" 2>/dev/null || true
     else
-      run_root find "$root/config/$product/active" -mindepth 1 -delete 2>/dev/null || true
+      find "$root/config/$product/active" -mindepth 1 -delete 2>/dev/null || true
       as_root -u "$OWNER" "$bee" --root="$web" --site="$product" install \
         --db-name="$db" --db-user="$user" --db-pass="$pass" \
         --site-name="$title" --auto || {
@@ -263,7 +288,7 @@ cmd_site_add() {
         return 1
       }
       as_root touch "$web/sites/$product/.stardust-installed"
-      run_root chown "$OWNER:$GROUP" "$web/sites/$product/.stardust-installed"
+      chown "$OWNER:$GROUP" "$web/sites/$product/.stardust-installed" 2>/dev/null || true
     fi
   fi
 
