@@ -210,7 +210,7 @@ cmd_site_add() {
       echo "db pass from $SECRETDIR/$platform/$product"
     else
       pass=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)
-      write_secret "$platform" "$product" "$user" "$pass" "$db"
+      write_secret "$platform" "$product" "$user" "$pass" "$db" || return 1
       echo "db pass written to $(secret_file "$platform" "$product") (not printed)"
     fi
   else
@@ -226,13 +226,19 @@ cmd_site_add() {
     echo "+ $cr -s -o $DAEMON -g $GROUP $root/files/$product $root/files_private/$product $root/config/$product/active"
     echo "+ $cr -o $OWNER -g $GROUP $root/config/$product/staging"
   else
-    # crdir calls sudo itself; run as the operator, not deploy
+    # crdir calls sudo itself. Capture failure instead of continuing.
     "$cr" -s -o "$DAEMON" -g "$GROUP" \
       "$root/files/$product" \
       "$root/files_private/$product" \
-      "$root/config/$product/active"
+      "$root/config/$product/active" || {
+      echo "$PROG: crdir failed for files/config of $product" >&2
+      return 1
+    }
     "$cr" -o "$OWNER" -g "$GROUP" \
-      "$root/config/$product/staging"
+      "$root/config/$product/staging" || {
+      echo "$PROG: crdir failed for staging of $product" >&2
+      return 1
+    }
   fi
 
   ensure_settings_php "$root" "$product"

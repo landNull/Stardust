@@ -83,13 +83,16 @@ write_secret() {
     echo "+ write $dest (0640)"
     return 0
   fi
-  # Secrets dir is deploy:stardust. Caller in stardust can mkdir.
+  # Secrets dir is deploy:stardust with group write. Caller in
+  # stardust can create the platform dir and the files.
   mkdir -p "$SECRETDIR/$platform" 2>/dev/null || {
     echo "$PROG: cannot create $SECRETDIR/$platform" >&2
     return 1
   }
-  # tee, not sh -c cat: sudo does not forward a heredoc to sh -c
-  as_root tee "$dest" >/dev/null <<EOF
+  cat > "$dest" <<EOF || {
+    echo "$PROG: cannot write $dest" >&2
+    return 1
+  }
 # stardust secret — do not commit
 db=$db
 user=$user
@@ -97,13 +100,16 @@ pass=$pass
 host=localhost
 EOF
   cnf=${dest}.cnf
-  as_root tee "$cnf" >/dev/null <<EOF
+  cat > "$cnf" <<EOF || {
+    echo "$PROG: cannot write $cnf" >&2
+    return 1
+  }
 [client]
 user=$user
 password=$pass
 host=localhost
 EOF
-  chown_secret "$dest" "$cnf"
+  chmod 0640 "$dest" "$cnf" 2>/dev/null || true
 }
 
 read_secret_pass() {
