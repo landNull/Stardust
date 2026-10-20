@@ -64,28 +64,42 @@ cmd_platform_add() {
     return 0
   fi
 
-  run_root mkdir -p "$PLATFORMS"
+  # /srv/platforms is deploy:www-admin setgid. A caller in www-admin
+  # can mkdir here without root. Fail closed if the directory is missing.
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "+ mkdir -p $dest"
+  else
+    mkdir -p "$dest" || {
+      echo "$PROG: cannot create $dest (need write on $PLATFORMS)" >&2
+      exit 1
+    }
+  fi
+
   if [ -n "$giturl" ]; then
     echo "clone $giturl branch $branch -> $dest"
-    run_root git clone --branch "$branch" "$giturl" "$dest" || run_root git clone "$giturl" "$dest"
+    as_root -u "$OWNER" git clone --branch "$branch" "$giturl" "$dest" || as_root -u "$OWNER" git clone "$giturl" "$dest"
   else
-    run_root mkdir -p "$dest"
-    run_root chown "$OWNER:$GROUP" "$dest"
     bee=$(bee_bin)
     if [ "$DRYRUN" -eq 1 ]; then
       echo "+ cd $dest && $bee dl-core web"
     else
       # dl-core creates the dest relative to cwd, not --root.
       # Do not use sh -c: sudoers allows /usr/local/bin/bee, not /bin/sh.
-      ( cd "$dest" && as_root -u "$OWNER" "$bee" dl-core web )
+      ( cd "$dest" && as_root -u "$OWNER" "$bee" dl-core web ) || {
+        echo "$PROG: bee dl-core failed in $dest" >&2
+        exit 1
+      }
     fi
   fi
 
-  run_root chown -R "$OWNER:$GROUP" "$dest"
+  as_root -u "$OWNER" chown -R "$OWNER:$GROUP" "$dest" 2>/dev/null || true
   write_gitignore "$dest/.gitignore"
 
   if [ "$DRYRUN" -eq 0 ] && [ ! -e "$dest/.git" ]; then
-    as_root -u "$OWNER" git -C "$dest" init
+    as_root -u "$OWNER" git -C "$dest" init || {
+      echo "$PROG: git init failed in $dest" >&2
+      exit 1
+    }
     as_root -u "$OWNER" git -C "$dest" checkout -B "$branch" 2>/dev/null || true
   fi
 
