@@ -114,6 +114,15 @@ case $cmd in
     printf '%s' "$name" | grep -Eq '^[A-Za-z0-9._-]+$' || exit 2
     a2ensite "$name"
     ;;
+  vhost-write)
+    # Read conf body on stdin. Path must be under sites-available.
+    conf=${1:-}
+    case $conf in
+      /etc/apache2/sites-available/*.conf|/etc/httpd/conf.d/*.conf) ;;
+      *) echo "$PROG: refuse vhost path $conf" >&2; exit 1 ;;
+    esac
+    cat > "$conf"
+    ;;
   mysql-create)
     db=$1 user=$2 cnf=$3
     ident_ok "$db" && ident_ok "$user" || exit 2
@@ -148,7 +157,7 @@ case $cmd in
     tail -n 20 "$f"
     ;;
   *)
-    echo "usage: $PROG chown-files|chown-code|chown-secret|chmod|mkdir|setacl|setacl-secret|apache-reload|a2ensite|mysql-create|mysql-drop|tail-log" >&2
+    echo "usage: $PROG chown-files|chown-code|chown-secret|chmod|mkdir|setacl|setacl-secret|apache-reload|a2ensite|vhost-write|mysql-create|mysql-drop|tail-log" >&2
     exit 2
     ;;
 esac

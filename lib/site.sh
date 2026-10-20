@@ -145,7 +145,7 @@ ensure_vhost() {
     return 0
   fi
   if [ ! -f "$conf" ]; then
-    as_root tee "$conf" >/dev/null <<EOF
+    priv vhost-write "$conf" <<EOF
 <VirtualHost *:80>
   ServerName $host
   DocumentRoot $web
@@ -164,13 +164,14 @@ ensure_vhost() {
 EOF
   else
     if ! grep -q "ServerName $host\|ServerAlias $host" "$conf"; then
-      as_root sed -i "/ServerName /a\\    ServerAlias $host" "$conf"
+      # Alias add stays a root edit; priv does not expose sed.
+      note "vhost $conf exists; add ServerAlias $host by hand if needed"
     fi
   fi
   if have a2ensite; then
-    run_root a2ensite "${platform}-${role}.conf" >/dev/null 2>&1 || true
+    priv a2ensite "${platform}-${role}.conf" >/dev/null 2>&1 || true
   fi
-  run_root sh -c "$APACHE_RELOAD" || true
+  priv apache-reload || true
 }
 
 cmd_site_add() {
