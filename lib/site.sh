@@ -221,25 +221,25 @@ cmd_site_add() {
   hostpat="^${hostpat}$"
   dsn="mysql://${user}:${pass}@localhost/${db}"
 
-  cr=$(need_crdir)
-  if [ "$DRYRUN" -eq 1 ]; then
-    echo "+ $cr -s -o $DAEMON -g $GROUP $root/files/$product $root/files_private/$product $root/config/$product/active"
-    echo "+ $cr -o $OWNER -g $GROUP $root/config/$product/staging"
-  else
-    # crdir calls sudo itself. Capture failure instead of continuing.
-    "$cr" -s -o "$DAEMON" -g "$GROUP" \
-      "$root/files/$product" \
-      "$root/files_private/$product" \
-      "$root/config/$product/active" || {
-      echo "$PROG: crdir failed for files/config of $product" >&2
-      return 1
-    }
-    "$cr" -o "$OWNER" -g "$GROUP" \
-      "$root/config/$product/staging" || {
-      echo "$PROG: crdir failed for staging of $product" >&2
-      return 1
-    }
-  fi
+  # Platform tree is deploy:www-admin setgid. Caller in www-admin
+  # can create these. www-data is in www-admin, so group write covers
+  # PHP. No crdir/sudo.
+  for d in \
+    "$root/files/$product" \
+    "$root/files_private/$product" \
+    "$root/config/$product/active" \
+    "$root/config/$product/staging"
+  do
+    if [ "$DRYRUN" -eq 1 ]; then
+      echo "+ mkdir -p $d"
+    else
+      mkdir -p "$d" || {
+        echo "$PROG: cannot create $d" >&2
+        return 1
+      }
+      chmod 2770 "$d" 2>/dev/null || true
+    fi
+  done
 
   ensure_settings_php "$root" "$product"
   ensure_sites_php "$web" "$host" "$product"
