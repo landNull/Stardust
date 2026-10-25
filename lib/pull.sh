@@ -38,7 +38,9 @@ cmd_site_pull() {
     echo "$PROG: remote backup failed" >&2
     exit 1
   }
+  echo "remote  latest"
   remote=$(ssh "$vps" "stardust site-backup $src_p $src_s --latest" 2>/dev/null || true)
+  remote=$(printf '%s\n' "$remote" | sed 's/\x1b\[[0-9;]*m//g' | grep '^/srv/stardust/backups/' | tail -n 1)
   if [ -z "$remote" ]; then
     echo "$PROG: remote snapshot path missing" >&2
     exit 1
