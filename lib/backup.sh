@@ -1,9 +1,23 @@
 # shellcheck shell=sh
 
 cmd_site_backup() {
+  latest=0
+  if [ "${3:-}" = "--latest" ]; then
+    latest=1
+  fi
   raw_plat=${1:-}
   raw_prod=${2:-}
   resolve_site "$raw_plat" "$raw_prod"
+  if [ "$latest" -eq 1 ]; then
+    platform=$(printf '%s' "$raw_plat" | tr '[:upper:]' '[:lower:]')
+    product=$(printf '%s' "$raw_prod" | tr '[:upper:]' '[:lower:]')
+    found=$(latest_backup "$platform" "$product" "${STARDUST_ROLE:-devel}" || true)
+    if [ -z "$found" ]; then
+      found=$(ls -1d /srv/stardust/backups/$platform/$product/*/20* 2>/dev/null | sort | tail -n 1)
+    fi
+    [ -n "$found" ] && echo "$found"
+    return 0
+  fi
   # Keep underscores. slug used to turn kl_test into kl-test, and Bee
   # then missed the sites.php line.
   platform=$(printf '%s' "$raw_plat" | tr '[:upper:]' '[:lower:]')
