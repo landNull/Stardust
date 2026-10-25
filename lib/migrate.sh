@@ -38,6 +38,47 @@ EOF
 }
 
 
+# Write sites/<product>/settings.local.php in one pass. Always a full
+# overwrite through a temp file, so the file never gets a second <?php.
+# Args: web plat product [host]
+_write_settings_local() {
+  wsl_web=$1
+  wsl_plat=$2
+  wsl_product=$3
+  wsl_host=${4:-}
+  wsl_dir=$wsl_web/sites/$wsl_product
+  wsl_out=$wsl_dir/settings.local.php
+  wsl_cfg=${PLATFORMS:-/srv/platforms}/$wsl_plat/config/$wsl_product
+  wsl_role=${STARDUST_ROLE:-}
+  if [ -z "$wsl_role" ] && [ -r /etc/stardust.conf ]; then
+    wsl_role=$(grep -E '^STARDUST_ROLE=' /etc/stardust.conf 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
+  fi
+  wsl_role=${wsl_role:-devel}
+  wsl_tmp=$(mktemp) || return 1
+  {
+    echo "<?php"
+    echo "// Written by stardust migrate. Overwritten on each run."
+    echo "\$config_directories['active']  = '$wsl_cfg/active';"
+    echo "\$config_directories['staging'] = '$wsl_cfg/staging';"
+    if [ -n "$wsl_host" ]; then
+      wsl_pat=$(printf '%s' "$wsl_host" | sed 's/[][\.*^$+?(){}|\/]/\\\\&/g')
+      echo "\$settings['trusted_host_patterns'] = array('^${wsl_pat}\$');"
+    fi
+    if [ "$wsl_role" != "live" ]; then
+      echo "\$settings['cache'] = FALSE;"
+    fi
+  } > "$wsl_tmp"
+  sudo mkdir -p "$wsl_dir"
+  sudo chmod 0644 "$wsl_tmp"
+  if sudo mv -f "$wsl_tmp" "$wsl_out"; then
+    echo "write $wsl_out (role $wsl_role)"
+  else
+    rm -f "$wsl_tmp"
+    return 1
+  fi
+}
+
+
 _map_site() {
   web=$1
   host=$2
@@ -59,15 +100,7 @@ _map_site() {
     echo "copy  settings.php -> sites/$product/"
     sudo cp "$web/settings.php" "$web/sites/$product/settings.php"
   fi
-  localphp=$web/sites/$product/settings.local.php
-  if [ ! -f "$localphp" ]; then
-    hostpat=$(printf '%s' "$host" | sed 's/\./\\\\./g')
-    echo "write trusted host in settings.local.php"
-    sudo tee "$localphp" >/dev/null << EOF
-<?php
-\$settings['trusted_host_patterns'] = array('^${hostpat}$');
-EOF
-  fi
+  _write_settings_local "$web" "${4:-$product}" "$product" "$host"
 }
 
 
@@ -170,18 +203,7 @@ _convert_standalone() {
   # site already has them there. Nothing to move.
   # Point settings at the platform config store. Absolute, so multi-site depth
   # does not matter.
-  localphp="$web/sites/$product/settings.local.php"
-  sudo mkdir -p "$web/sites/$product"
-  if [ -f "$localphp" ] && grep -q "config_directories" "$localphp"; then
-    sudo sed -i "s|config_directories\['active'\].*|config_directories['active']  = '$dest/config/$product/active';|" "$localphp" || true
-    sudo sed -i "s|config_directories\['staging'\].*|config_directories['staging'] = '$dest/config/$product/staging';|" "$localphp" || true
-  else
-    if [ ! -f "$localphp" ]; then
-      printf "%s\n" "<?php" "\$config_directories['active']  = '$dest/config/$product/active';" "\$config_directories['staging'] = '$dest/config/$product/staging';" | sudo tee "$localphp" >/dev/null
-    else
-      printf "%s\n" "\$config_directories['active']  = '$dest/config/$product/active';" "\$config_directories['staging'] = '$dest/config/$product/staging';" | sudo tee -a "$localphp" >/dev/null
-    fi
-  fi
+  _write_settings_local "$web" "${dest##*/}" "$product" ""
   echo "config $dest/config/$product/active"
 }
 
