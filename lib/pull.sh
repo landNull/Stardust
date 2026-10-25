@@ -82,13 +82,29 @@ _restore_snap() {
     as_root -u "$OWNER" "$bee" --root="$web" --site="$product" db-import "$dump"
   fi
   if [ -f "$snap/files.tar.gz" ]; then
-    run_root mkdir -p "$root/files/$product"
-    as_root tar -C "$root/files" -xzf "$snap/files.tar.gz"
-    if [ "$src_product" != "$product" ] && [ -d "$root/files/$src_product" ]; then
-      as_root mv "$root/files/$src_product" "$root/files/$product.tmp" 2>/dev/null || true
-      as_root rm -rf "$root/files/$product"
-      as_root mv "$root/files/$product.tmp" "$root/files/$product"
+    echo "unpack files -> $root/files/$product"
+    mkdir -p "$root/files/$product"
+    top=$(tar -tzf "$snap/files.tar.gz" | head -n 1 | cut -d/ -f1)
+    if [ "$top" = "files" ]; then
+      tar -C "$root/files/$product" -xzf "$snap/files.tar.gz" --strip-components=1
+    elif [ "$top" = "$src_product" ] || [ "$top" = "$product" ]; then
+      tar -C "$root/files" -xzf "$snap/files.tar.gz"
+      if [ "$top" != "$product" ] && [ -d "$root/files/$top" ]; then
+        rm -rf "$root/files/$product"
+        mv "$root/files/$top" "$root/files/$product"
+      fi
+    else
+      tar -C "$root/files/$product" -xzf "$snap/files.tar.gz"
     fi
+    n=$(find "$root/files/$product" -type f | wc -l)
+    echo "files  $n"
+    if [ "$n" -eq 0 ]; then
+      echo "$PROG: files archive unpacked empty" >&2
+      return 1
+    fi
+    chown_files "$root/files/$product" 2>/dev/null || true
+  else
+    echo "files  none in snapshot"
   fi
   if [ -f "$snap/files_private.tar.gz" ]; then
     run_root mkdir -p "$root/files_private/$product"
