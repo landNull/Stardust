@@ -157,31 +157,35 @@ _restore_snap() {
   if [ -f "$settingsphp" ] && ! grep -q "settings.local.php" "$settingsphp"; then
     printf '\n%s\n' "if (file_exists(__DIR__ . '/settings.local.php')) { include __DIR__ . '/settings.local.php'; }" | as_root tee -a "$settingsphp" >/dev/null
   fi
-  if [ -f "$localphp" ] && grep -q file_public_path "$localphp"; then
-    as_root sed -i "s|file_public_path'] = .*|file_public_path'] = 'sites/$product/files';|" "$localphp" || true
-  else
-    printf "%s\n" "<?php" "\$settings['file_public_path'] = 'sites/$product/files';" | as_root tee -a "$localphp" >/dev/null || true
-  fi
-  echo "files path sites/$product/files"
-  # Backdrop config lives outside the site dir. Point settings at the store.
+  # One clean settings.local.php. Never append. Preserve the DSN site-add wrote.
   cfgactive="$root/config/$product/active"
   cfgstaging="$root/config/$product/staging"
-  if [ -d "$cfgactive" ]; then
-    run_root mkdir -p "$cfgstaging"
-    if [ -f "$localphp" ] && grep -q "config_directories" "$localphp"; then
-      as_root sed -i "s|config_directories\['active'\].*|config_directories['active']  = '$cfgactive';|" "$localphp" || true
-      as_root sed -i "s|config_directories\['staging'\].*|config_directories['staging'] = '$cfgstaging';|" "$localphp" || true
-    else
-      if [ ! -f "$localphp" ]; then
-        printf "%s\n" "<?php" "\$config_directories['active']  = '$cfgactive';" "\$config_directories['staging'] = '$cfgstaging';" | as_root tee "$localphp" >/dev/null || true
-      else
-        printf "%s\n" "\$config_directories['active']  = '$cfgactive';" "\$config_directories['staging'] = '$cfgstaging';" | as_root tee -a "$localphp" >/dev/null || true
-      fi
+  run_root mkdir -p "$cfgstaging" 2>/dev/null || true
+  dsnline=$(grep -E '^\$database' "$localphp" 2>/dev/null | head -n 1 || true)
+  role=${STARDUST_ROLE:-devel}
+  hostpat=$(printf '%s' "$host" | sed 's/[][\.*^$+?(){}|\/]/\\\\&/g')
+  tmp=$(mktemp) || return 1
+  {
+    echo "<?php"
+    echo "// Written by stardust pull. Overwritten on each run."
+    if [ -n "$dsnline" ]; then
+      echo "$dsnline"
     fi
-    echo "config $cfgactive"
+    echo "\$config_directories['active']  = '$cfgactive';"
+    echo "\$config_directories['staging'] = '$cfgstaging';"
+    echo "\$settings['file_public_path'] = 'sites/$product/files';"
+    echo "\$settings['trusted_host_patterns'] = array('^${hostpat}\$');"
+    if [ "$role" != "live" ]; then
+      echo "\$settings['cache'] = FALSE;"
+    fi
+  } > "$tmp"
+  as_root chmod 0640 "$tmp"
+  if as_root mv -f "$tmp" "$localphp"; then
+    echo "write $localphp (role $role)"
+  else
+    rm -f "$tmp"
+    return 1
   fi
-  hostpat=$(printf '%s' "$host" | sed 's/\./\\\\./g')
-  if [ -f "$localphp" ]; then
-    as_root sed -i "s/trusted_host_patterns.*/trusted_host_patterns'] = array('^${hostpat}$');/" "$localphp" || true
-  fi
+  echo "files path sites/$product/files"
+  echo "config $cfgactive"
 }
