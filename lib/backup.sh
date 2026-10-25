@@ -46,11 +46,24 @@ cmd_site_backup() {
     return 1
   fi
 
+  # Multi-site layout, then the single-site web/files this migrate left behind.
   if [ -d "$root/files/$product" ]; then
-    as_root tar -C "$root/files" -czf "$dest/files.tar.gz" "$product"
+    echo "files $root/files/$product"
+    tar -C "$root/files" -czf "$dest/files.tar.gz" "$product" 2>/dev/null || as_root tar -C "$root/files" -czf "$dest/files.tar.gz" "$product"
+  elif [ -d "$web/files" ]; then
+    echo "files $web/files"
+    tar -C "$web" -czf "$dest/files.tar.gz" files 2>/dev/null || as_root tar -C "$web" -czf "$dest/files.tar.gz" files
+  else
+    echo "files none"
   fi
   if [ -d "$root/files_private/$product" ]; then
-    as_root tar -C "$root/files_private" -czf "$dest/files_private.tar.gz" "$product"
+    echo "private $root/files_private/$product"
+    tar -C "$root/files_private" -czf "$dest/files_private.tar.gz" "$product" 2>/dev/null || as_root tar -C "$root/files_private" -czf "$dest/files_private.tar.gz" "$product"
+  elif [ -d "$web/files/private" ]; then
+    echo "private $web/files/private"
+    tar -C "$web/files" -czf "$dest/files_private.tar.gz" private 2>/dev/null || as_root tar -C "$web/files" -czf "$dest/files_private.tar.gz" private
+  else
+    echo "private none"
   fi
   if [ -d "$root/config/$product/active" ]; then
     as_root tar -C "$root/config/$product" -czf "$dest/config-active.tar.gz" active
