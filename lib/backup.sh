@@ -52,7 +52,7 @@ cmd_site_backup() {
     tar -C "$root/files" -czf "$dest/files.tar.gz" "$product" 2>/dev/null || as_root tar -C "$root/files" -czf "$dest/files.tar.gz" "$product"
   elif [ -d "$web/files" ]; then
     echo "files $web/files"
-    tar -C "$web" -czf "$dest/files.tar.gz" files 2>/dev/null || as_root tar -C "$web" -czf "$dest/files.tar.gz" files
+    tar -C "$web/files" -czf "$dest/files.tar.gz" --transform "s|^|$product/|" . 2>/dev/null || as_root tar -C "$web/files" -czf "$dest/files.tar.gz" --transform "s|^|$product/|" .
   else
     echo "files none"
   fi
@@ -136,7 +136,9 @@ cmd_site_restore() {
     "$root/config/$product/active"
 
   if [ -f "$from/files.tar.gz" ]; then
-    as_root tar -C "$root/files" -xzf "$from/files.tar.gz"
+    echo "unpack files -> $root/files/$product"
+    mkdir -p "$root/files"
+    tar -C "$root/files" -xzf "$from/files.tar.gz" 2>/dev/null || as_root tar -C "$root/files" -xzf "$from/files.tar.gz"
   fi
   if [ -f "$from/files_private.tar.gz" ]; then
     as_root tar -C "$root/files_private" -xzf "$from/files_private.tar.gz"
